@@ -37,6 +37,7 @@ public interface Watcher {
     @InterfaceAudience.Public
     public interface Event {
         /**
+         * 事件发生时，ZooKeeper客户端或者服务端处于的状态枚举
          * Enumeration of states the ZooKeeper may be at the event
          */
         @InterfaceAudience.Public
@@ -53,7 +54,10 @@ public interface Watcher {
             @Deprecated
             NoSyncConnected (1),
 
-            /** The client is in the connected state - it is connected
+            /**
+             * 客户端处于连接状态-它已连接到整体中的服务器
+             * （在ZooKeeper客户端创建过程中，主机连接参数中指定的服务器之一）。
+             * The client is in the connected state - it is connected
              * to a server in the ensemble (one of the servers specified
              * in the host connection parameter during ZooKeeper client
              * creation). */
@@ -123,6 +127,7 @@ public interface Watcher {
         }
 
         /**
+         * 所有事件的类型枚举
          * Enumeration of types of events that may occur on the ZooKeeper
          */
         @InterfaceAudience.Public

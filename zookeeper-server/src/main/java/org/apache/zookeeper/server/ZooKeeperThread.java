@@ -33,6 +33,7 @@ public class ZooKeeperThread extends Thread {
 
         @Override
         public void uncaughtException(Thread t, Throwable e) {
+            //只记日志
             handleException(t.getName(), e);
         }
     };

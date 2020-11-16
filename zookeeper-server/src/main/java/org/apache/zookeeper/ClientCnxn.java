@@ -132,6 +132,7 @@ public class ClientCnxn {
 
     /**
      * These are the packets that need to be sent.
+     * 需要被发送的信息队列
      */
     private final LinkedBlockingDeque<Packet> outgoingQueue = new LinkedBlockingDeque<Packet>();
 
@@ -196,6 +197,12 @@ public class ClientCnxn {
      * <p>
      * If this field is false (which implies we haven't seen r/w server before)
      * then non-zero sessionId is fake, otherwise it is valid.
+     *
+     * 首次建立与r/w服务器的连接时设置为true，此后从未改变。
+     * 用于处理没有sessionId的客户端连接到只读服务器时的情况。
+     * 这样的客户端从只读服务器接收“伪”sessionId，但是该sessionId对于其他服务器无效。
+     * 因此，当此类客户端找到一个r/w服务器时，它将在连接握手期间发送0而不是伪造的sessionId，并建立新的有效会话。
+     * 如果该字段为假（这意味着我们之前从未见过R/W服务器），非零sessionId为假，否则为有效。
      */
     volatile boolean seenRwServerBefore = false;
 
@@ -399,13 +406,16 @@ public class ClientCnxn {
         readTimeout = sessionTimeout * 2 / 3;
         readOnly = canBeReadOnly;
 
+        //传入客户端socket，构建1个发送线程
         sendThread = new SendThread(clientCnxnSocket);
+        //构建1个事件线程
         eventThread = new EventThread();
         this.clientConfig=zooKeeper.getClientConfig();
         initRequestTimeout();
     }
 
     public void start() {
+        //客户端启动两个线程
         sendThread.start();
         eventThread.start();
     }
@@ -801,6 +811,11 @@ public class ClientCnxn {
     /**
      * This class services the outgoing request queue and generates the heart
      * beats. It also spawns the ReadThread.
+     *
+     * 发送线程，负责心跳、出队
+     *
+     * TODO 此类为传出请求队列提供服务并生成心跳。
+     * 它还产生了ReadThread。？？
      */
     class SendThread extends ZooKeeperThread {
         private long lastPingSentNs;
@@ -930,8 +945,10 @@ public class ClientCnxn {
 
         SendThread(ClientCnxnSocket clientCnxnSocket) {
             super(makeThreadName("-SendThread()"));
+            //尝试连接中
             state = States.CONNECTING;
             this.clientCnxnSocket = clientCnxnSocket;
+            //守护线程
             setDaemon(true);
         }
 
@@ -954,6 +971,7 @@ public class ClientCnxn {
 
         /**
          * Setup session, previous watches, authentication.
+         * prime：动词，填装
          */
         void primeConnection() throws IOException {
             LOG.info("Socket connection established, initiating session, client: {}, server: {}",

@@ -1,6 +1,6 @@
 <ivysettings>
 
- <!--
+  <!--
    Licensed to the Apache Software Foundation (ASF) under one or more
    contributor license agreements.  See the NOTICE file distributed with
    this work for additional information regarding copyright ownership.
@@ -17,22 +17,20 @@
    limitations under the License.
 -->
 
-  <property name="repo.maven.org"
-    value="https://repo1.maven.org/maven2/" override="false"/>
-  <property name="repo.jboss.org"
-    value="https://repository.jboss.org/nexus/content/groups/public/" override="false"/>
-  <property name="maven2.pattern"
-    value="[organisation]/[module]/[revision]/[module]-[revision]"/>
+  <property name="repo.aliyun" value="https://maven.aliyun.com/nexus/content/groups/public/" override="false"/>
+  <property name="repo.maven.org" value="https://repo1.maven.org/maven2/" override="false"/>
+  <property name="repo.jboss.org" value="https://repository.jboss.org/nexus/content/groups/public/" override="false"/>
+  <property name="maven2.pattern" value="[organisation]/[module]/[revision]/[module]-[revision]"/>
   <property name="maven2.pattern.ext" value="${maven2.pattern}.[ext]"/>
   <include url="${ivy.default.conf.dir}/ivyconf-local.xml"/>
   <settings defaultResolver="default"/>
   <resolvers>
-    <ibiblio name="maven2" root="${repo.maven.org}"
-      pattern="${maven2.pattern.ext}" m2compatible="true"/>
-    <ibiblio name="jboss-maven2" root="${repo.jboss.org}"
-      pattern="${maven2.pattern.ext}" m2compatible="true"/>
+    <ibiblio name="aliyun" root="${repo.aliyun}" pattern="${maven2.pattern.ext}" m2compatible="true"/>
+    <ibiblio name="maven2" root="${repo.maven.org}" pattern="${maven2.pattern.ext}" m2compatible="true"/>
+    <ibiblio name="jboss-maven2" root="${repo.jboss.org}" pattern="${maven2.pattern.ext}" m2compatible="true"/>
 
     <chain name="default" dual="true">
+      <resolver ref="aliyun"/>
       <resolver ref="maven2"/>
       <resolver ref="jboss-maven2"/>
     </chain>

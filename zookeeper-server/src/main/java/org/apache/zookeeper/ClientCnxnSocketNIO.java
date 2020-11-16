@@ -61,6 +61,7 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
     }
     
     /**
+     * 读、写channel
      * @return true if a packet was received
      * @throws InterruptedException
      * @throws IOException
@@ -120,13 +121,17 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
                     }
                     p.createBB();
                 }
+                //写入channel，发送到服务端
                 sock.write(p.bb);
                 if (!p.bb.hasRemaining()) {
                     sentCount.getAndIncrement();
+                    //从出站队列中删除该对象
                     outgoingQueue.removeFirstOccurrence(p);
                     if (p.requestHeader != null
                             && p.requestHeader.getType() != OpCode.ping
                             && p.requestHeader.getType() != OpCode.auth) {
+                        //加入到待处理队列pendingQueue，等待接收服务端响应数据后，继续处理，比如唤醒请求线程等
+                        //但是要排除不需要等待的，比如心跳ping和auth
                         synchronized (pendingQueue) {
                             pendingQueue.add(p);
                         }
@@ -139,6 +144,8 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
                 // from within ZooKeeperSaslClient (if client is configured
                 // to attempt SASL authentication), or in either doIO() or
                 // in doTransport() if not.
+                //没有更多数据包要发送：关闭写兴趣标记。
+                //通过稍后对enableWrite（）的调用来打开。
                 disableWrite();
             } else if (!initialized && p != null && !p.bb.hasRemaining()) {
                 // On initial connection, write the complete connect request
@@ -153,11 +160,13 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
                 disableWrite();
             } else {
                 // Just in case
+                //增加写兴趣标记
                 enableWrite();
             }
         }
     }
 
+    //类似于peek，不需要出队，只是看下数据内容。后面发送成功后，才会出队、删除。
     private Packet findSendablePacket(LinkedBlockingDeque<Packet> outgoingQueue,
                                       boolean tunneledAuthInProgres) {
         if (outgoingQueue.isEmpty()) {
@@ -355,6 +364,7 @@ public class ClientCnxnSocketNIO extends ClientCnxnSocket {
             SocketChannel sc = ((SocketChannel) k.channel());
             if ((k.readyOps() & SelectionKey.OP_CONNECT) != 0) {
                 if (sc.finishConnect()) {
+                    //最后发送时间 和 心跳时间一起更新
                     updateLastSendAndHeard();
                     updateSocketAddresses();
                     sendThread.primeConnection();

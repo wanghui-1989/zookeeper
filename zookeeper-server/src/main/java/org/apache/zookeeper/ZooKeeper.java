@@ -258,14 +258,19 @@ public class ZooKeeper implements AutoCloseable {
      * We are implementing this as a nested class of ZooKeeper so that
      * the public methods will not be exposed as part of the ZooKeeper client
      * API.
+     * 管理观察者并处理由ClientCnxn对象生成的事件。
+     * 我们将其实现为ZooKeeper的嵌套类，以使公共方法不会作为ZooKeeper客户端API的一部分公开。
      */
     static class ZKWatchManager implements ClientWatchManager {
+        //zk只有3个支持注册watcher的方法: getData, exists, getChildren
+        //每个对应一个map
         private final Map<String, Set<Watcher>> dataWatches =
             new HashMap<String, Set<Watcher>>();
         private final Map<String, Set<Watcher>> existWatches =
             new HashMap<String, Set<Watcher>>();
         private final Map<String, Set<Watcher>> childWatches =
             new HashMap<String, Set<Watcher>>();
+        //是否禁用自动重置watch，每次reconnect时，会判断这个值，决定是否重置watch。
         private boolean disableAutoWatchReset;
 
         ZKWatchManager(boolean disableAutoWatchReset) {
@@ -466,6 +471,9 @@ public class ZooKeeper implements AutoCloseable {
             switch (type) {
             case None:
                 result.add(defaultWatcher);
+                //禁用自动重置观察者 并且 客户端状态 != 已连接状态
+                //clear为true的话，会清空注册的getData观察者
+                //默认配置不会清空
                 boolean clear = disableAutoWatchReset && state != Watcher.Event.KeeperState.SyncConnected;
                 synchronized(dataWatches) {
                     for(Set<Watcher> ws: dataWatches.values()) {
@@ -476,6 +484,7 @@ public class ZooKeeper implements AutoCloseable {
                     }
                 }
 
+                //同上 存在
                 synchronized(existWatches) {
                     for(Set<Watcher> ws: existWatches.values()) {
                         result.addAll(ws);
@@ -485,6 +494,7 @@ public class ZooKeeper implements AutoCloseable {
                     }
                 }
 
+                //同上 子节点
                 synchronized(childWatches) {
                     for(Set<Watcher> ws: childWatches.values()) {
                         result.addAll(ws);
@@ -494,12 +504,16 @@ public class ZooKeeper implements AutoCloseable {
                     }
                 }
 
+                //返回了所有的观察者对象
                 return result;
             case NodeDataChanged:
             case NodeCreated:
+                //节点数据更新事件 和 节点创建事件
+                //从dataWatches查找
                 synchronized (dataWatches) {
                     addTo(dataWatches.remove(clientPath), result);
                 }
+                //从existWatches查找
                 synchronized (existWatches) {
                     addTo(existWatches.remove(clientPath), result);
                 }
@@ -872,6 +886,7 @@ public class ZooKeeper implements AutoCloseable {
             clientConfig = new ZKClientConfig();
         }
         this.clientConfig = clientConfig;
+        //观察者管理器
         watchManager = defaultWatchManager();
         watchManager.defaultWatcher = watcher;
         ConnectStringParser connectStringParser = new ConnectStringParser(
@@ -1308,6 +1323,7 @@ public class ZooKeeper implements AutoCloseable {
 
     // default hostprovider
     private static HostProvider createDefaultHostProvider(String connectString) {
+        //解析服务端地址字符串，收集成list，使用随机种子，shuffle(list,randomseed)
         return new StaticHostProvider(
                 new ConnectStringParser(connectString).getServerAddresses());
     }

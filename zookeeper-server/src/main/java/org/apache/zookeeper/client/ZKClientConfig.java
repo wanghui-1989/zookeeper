@@ -49,6 +49,7 @@ public class ZKClientConfig extends ZKConfig {
      * automatically reset watches during session reconnect, this option allows
      * the client to turn off this behavior by setting the property
      * "zookeeper.disableAutoWatchReset" to "true"
+     * 这控制是否启用自动watch重置。 客户端在会话重新连接期间自动重置watch。
      */
     public static final String DISABLE_AUTO_WATCH_RESET = "zookeeper.disableAutoWatchReset";
     @SuppressWarnings("deprecation")
@@ -58,6 +59,7 @@ public class ZKClientConfig extends ZKConfig {
      */
     @SuppressWarnings("deprecation")
     public static final String SECURE_CLIENT = ZooKeeper.SECURE_CLIENT;
+    //客户端内容最大字节数 4MB
     public static final int CLIENT_MAX_PACKET_LENGTH_DEFAULT = 4096 * 1024; /* 4 MB */
     public static final String ZOOKEEPER_REQUEST_TIMEOUT = "zookeeper.request.timeout";
     public static final String ZOOKEEPER_SERVER_PRINCIPAL = "zookeeper.server.principal";

@@ -24,6 +24,9 @@ import java.util.Set;
  */
 public interface ClientWatchManager {
     /**
+     * 返回一组观察者，路径path触发了type类型的事件，返回对这个进行监听的观察者。
+     *
+     * materialize：动词，物化/赋予实质的意思
      * Return a set of watchers that should be notified of the event. The 
      * manager must not notify the watcher(s), however it will update it's 
      * internal structure as if the watches had triggered. The intent being 
