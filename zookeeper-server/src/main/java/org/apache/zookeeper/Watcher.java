@@ -87,7 +87,10 @@ public interface Watcher {
             /** The serving cluster has expired this session. The ZooKeeper
              * client connection (the session) is no longer valid. You must
              * create a new client connection (instantiate a new ZooKeeper
-             * instance) if you with to access the ensemble. */
+             * instance) if you with to access the ensemble.
+             * 服务群集已在此会话中过期。 ZooKeeper客户端连接（会话）不再有效。
+             * 如果要访问集群，则必须创建一个新的客户端连接（实例化一个新的ZooKeeper实例）。
+             */
             Expired (-112),
             
             /** 
@@ -132,6 +135,7 @@ public interface Watcher {
          */
         @InterfaceAudience.Public
         public enum EventType {
+            /** None比较特殊，很多地方使用，比如触发服务器事件时（如zk只读事件），服务器事件都会用这个类型 **/
             None (-1),
             NodeCreated (1),
             NodeDeleted (2),

@@ -52,12 +52,14 @@ abstract class ClientCnxnSocket {
 
     /**
      * This buffer is only used to read the length of the incoming message.
+     * 只用来存储可以读取到的数据长度，4个字节，int
      */
     protected final ByteBuffer lenBuffer = ByteBuffer.allocateDirect(4);
 
     /**
      * After the length is read, a new incomingBuffer is allocated in
      * readLength() to receive the full message.
+     * 拿到数据的长度以后，会创建一个可以存储这么多数据的byteBuffer，读取所有数据。
      */
     protected ByteBuffer incomingBuffer = lenBuffer;
     protected final AtomicLong sentCount = new AtomicLong(0L);
@@ -119,6 +121,8 @@ abstract class ClientCnxnSocket {
     void readLength() throws IOException {
         int len = incomingBuffer.getInt();
         if (len < 0 || len >= packetLen) {
+            //长度不能为0 或者 不能大于配置的最大长度，缺省为4MB。
+            //相当于缺省情况下，一次服务端响应数据大小不能大于4M，存数据的时候要考虑到这个。
             throw new IOException("Packet len" + len + " is out of range!");
         }
         incomingBuffer = ByteBuffer.allocate(len);
@@ -142,6 +146,7 @@ abstract class ClientCnxnSocket {
         // read "is read-only" flag
         boolean isRO = false;
         try {
+            //连接到的服务器的r/w状态
             isRO = bbia.readBool("readOnly");
         } catch (IOException e) {
             // this is ok -- just a packet from an old server which

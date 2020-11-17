@@ -165,6 +165,7 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
                         channel = channelFuture.channel();
 
                         disconnected.set(false);
+                        //建立连接以后initialized置为false
                         initialized = false;
                         lenBuffer.clear();
                         incomingBuffer = lenBuffer;
@@ -266,7 +267,9 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
                      ClientCnxn cnxn)
             throws IOException, InterruptedException {
         try {
+            //CountDownLatch 阻塞等待完成连接建立
             if (!firstConnect.await(waitTimeOut, TimeUnit.MILLISECONDS)) {
+                //超时未建立连接，连接失败
                 return;
             }
             Packet head = null;
@@ -275,6 +278,7 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
                     return;
                 }
             } else {
+                //从出站队列中移除请求包
                 head = outgoingQueue.poll(waitTimeOut, TimeUnit.MILLISECONDS);
             }
             // check if being waken up on closing.
@@ -291,6 +295,7 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
                         + " is lost");
             }
             if (head != null) {
+                //发送请求，会将outgoingQueue的数据清空，都发出去，才会返回
                 doWrite(pendingQueue, head, cnxn);
             }
         } finally {
@@ -351,31 +356,57 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
 
     /**
      * doWrite handles writing the packets from outgoingQueue via network to server.
+     * 按照从头到尾的顺序，循环从outgoingQueue队列中取数据，生成事务id，放到pendingQueue，然后写channel，
+     * 把outgoingQueue都取空了之后，才会退出循环，最后调一次flush。
+     * 按照这个顺序和单线程的写法，从packet被放到outgoingQueue中以后，后面都是按照从头到尾的顺序来的，也就是入队的先后顺序。
+     * 按这个顺序放到pendingQueue，然后按这个顺序写channel，发送到服务器。服务器收到反序列化后，也是按照发送的先后顺序。
+     * 因为是同一个服务器，同一个业务，正常来说，先到服务器，先被处理，因为是相同的业务代码，处理时间基本差不多，
+     * 所以基本也会按照这个先后顺序，返回到客户端。到了客户端，按照从头到尾的顺序直接从pendingQueue取packet，基本上应该是一一匹配的。
+     * 如果不匹配，看下他的处理逻辑，好像是抛异常。
      */
     private void doWrite(List<Packet> pendingQueue, Packet p, ClientCnxn cnxn) {
         updateNow();
+        //是否有数据包被发送了
         boolean anyPacketsSent = false;
         while (true) {
             if (p != WakeupPacket.getInstance()) {
+                //不是WakeupPacket
                 if ((p.requestHeader != null) &&
                         (p.requestHeader.getType() != ZooDefs.OpCode.ping) &&
                         (p.requestHeader.getType() != ZooDefs.OpCode.auth)) {
+                    //不是心跳 不是ACL
+                    //生成事务id
                     p.requestHeader.setXid(cnxn.getXid());
                     synchronized (pendingQueue) {
+                        //pendingQueue是一个LinkedList，非线程安全
+                        //追加到尾部，等待匹配服务端响应数据
                         pendingQueue.add(p);
                     }
                 }
+                //channel write 但不flush
                 sendPktOnly(p);
+                //标记有数据包被发送了
                 anyPacketsSent = true;
             }
+
+            //是WakeupPacket 或者 上面写数据后继续执行
             if (outgoingQueue.isEmpty()) {
+                //相当于outgoingQueue队列中只有一个WakeupPacket
+                //或者 队列里面的数据都被写到channel里面，发送了，队列为空
+                //因为只有这里能跳出循环，所以一定要把outgoingQueue里面的数据都发送完，才会退出。
                 break;
             }
+
+            //outgoingQueue非空，有其他类型待发送的请求数据
+            //移除队列头
             p = outgoingQueue.remove();
         }
+
+        //zk的作者真逗，哈哈
         // TODO: maybe we should flush in the loop above every N packets/bytes?
         // But, how do we determine the right value for N ...
         if (anyPacketsSent) {
+            //有数据包被写入channel，这里调一次flush
             channel.flush();
         }
     }
@@ -488,22 +519,33 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
 
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, ByteBuf buf) throws Exception {
+            //收到服务端响应
+            //更新当前相对时间
             updateNow();
             while (buf.isReadable()) {
                 if (incomingBuffer.remaining() > buf.readableBytes()) {
+                    //剩余的响应数据长度不足以填满byteBuffer
                     int newLimit = incomingBuffer.position()
                             + buf.readableBytes();
+                    //计算并更新limit的值
                     incomingBuffer.limit(newLimit);
                 }
+
+                //把数据读到incomingBuffer中
                 buf.readBytes(incomingBuffer);
                 incomingBuffer.limit(incomingBuffer.capacity());
 
                 if (!incomingBuffer.hasRemaining()) {
+                    //incomingBuffer满了
+                    //转为读模式
                     incomingBuffer.flip();
                     if (incomingBuffer == lenBuffer) {
+                        //获取可以读取的数据长度，然后创建新的byteBuffer
                         recvCount.getAndIncrement();
                         readLength();
                     } else if (!initialized) {
+                        //和服务端建立连接后，initialized会被置为false
+                        //这里相当于建立连接后的第一次读取服务端响应数据，读到的应该是建立连接的结果，比如服务器是否是readOnly
                         readConnectResult();
                         lenBuffer.clear();
                         incomingBuffer = lenBuffer;
