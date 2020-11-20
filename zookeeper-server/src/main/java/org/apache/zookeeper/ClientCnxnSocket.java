@@ -155,6 +155,7 @@ abstract class ClientCnxnSocket {
         }
 
         this.sessionId = conRsp.getSessionId();
+        //连接建立，处理session过期、服务器分区只读、已连接等事件
         sendThread.onConnected(conRsp.getTimeOut(), this.sessionId,
                 conRsp.getPasswd(), isRO);
     }

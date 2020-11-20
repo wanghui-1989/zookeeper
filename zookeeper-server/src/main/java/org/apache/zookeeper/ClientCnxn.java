@@ -451,12 +451,17 @@ public class ClientCnxn {
 
     /**
      * 事件线程
-     * 内部有一个LinkedBlockingQueue，被触发的一个事件和对应的多个观察者(1:N)会封装成一对，加到队列尾部，
+     * 内部有一个LinkedBlockingQueue，存储多种类型的对象，
+     * 有的是被触发的一个事件和对应的多个观察者(1:N)会封装成一对,即WatcherSetEventPair，加到队列尾部，
+     * 有的是毒丸，有的是LocalCallback等等。
      * 1个EventThread不断地从waitingEvents队列中取出，遍历、同步调用执行事件处理逻辑。
      * 1个客户端ClientCnxn对象，内部只有1个EventThread和1个sendThread。
      *
      * 如果遇到当前客户端会话关闭等事件时，会入队一个毒丸eventOfDeath，
      * EventThread会在执行完所有waitingEvents队列中的任务之后，关闭线程，杀死自己。
+     *
+     * 操作1个队列：
+     *  1. LinkedBlockingQueue<Object> waitingEvents 已触发的事件 和 监听对应事件的观察者 队列
      */
     class EventThread extends ZooKeeperThread {
         private final LinkedBlockingQueue<Object> waitingEvents =
@@ -517,11 +522,13 @@ public class ClientCnxn {
        @SuppressFBWarnings("JLM_JSR166_UTILCONCURRENT_MONITORENTER")
        public void queuePacket(Packet packet) {
           if (wasKilled) {
+             //拿到过毒丸
              synchronized (waitingEvents) {
-                if (isRunning) waitingEvents.add(packet);
-                else processEvent(packet);
+                if (isRunning) waitingEvents.add(packet); //还没有关闭eventThread，加到队列中
+                else processEvent(packet); //已关闭线程，用当前线程执行事件
              }
           } else {
+             // 正常逻辑，入队
              waitingEvents.add(packet);
           }
        }
@@ -717,6 +724,7 @@ public class ClientCnxn {
     }
 
     // @VisibleForTesting
+    //收到服务端响应后的finally处理，一定执行
     protected void finishPacket(Packet p) {
         int err = p.replyHeader.getErr();
         if (p.watchRegistration != null) {
@@ -749,9 +757,9 @@ public class ClientCnxn {
         if (p.cb == null) {
             //未注册回调
             synchronized (p) {
-                //请求完成
+                //收到响应，通信完成
                 p.finished = true;
-                //唤醒所有阻塞线程，比如客户端同步发送请求，阻塞等待响应，此时拿到响应，唤醒返回
+                //唤醒所有阻塞线程，比如客户端同步发送请求，阻塞等待响应，此时p.response拿到响应，唤醒返回
                 p.notifyAll();
             }
         } else {
@@ -842,10 +850,16 @@ public class ClientCnxn {
      * This class services the outgoing request queue and generates the heart
      * beats. It also spawns the ReadThread.
      *
-     * 发送线程，负责心跳、出队
+     * 发送线程
+     * 负责从outgoingQueue拿取请求packet、发送packet，包括客户端的业务请求和心跳、ACL等。
+     * 负责读取服务端响应，判断数据类型，比如ping的响应、心跳、ACL、业务、事件等
+     * 如果是事件会调用事件线程eventThread入队事件。
+     * 如果是业务数据会根据发送顺序匹配请求对象。
      *
-     * TODO 此类为传出请求队列提供服务并生成心跳。
-     * 它还产生了ReadThread。？？
+     * 操作两个队列：
+     *   1. LinkedBlockingDeque<Packet> outgoingQueue 待发送请求队列
+     *   2. LinkedList<Packet> pendingQueue 已发送请求，等待响应返回，匹配对应的请求和响应，将响应set到Packet.response
+     *
      */
     class SendThread extends ZooKeeperThread {
         private long lastPingSentNs;
@@ -863,6 +877,7 @@ public class ClientCnxn {
             replyHdr.deserialize(bbia, "header");
             if (replyHdr.getXid() == -2) {
                 //ping心跳响应
+                //客户端ping服务端的响应
                 // -2 is the xid for pings
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Got ping response for sessionid: 0x"
@@ -882,7 +897,7 @@ public class ClientCnxn {
                     //权限认证失败事件入队
                     eventThread.queueEvent( new WatchedEvent(Watcher.Event.EventType.None, 
                             Watcher.Event.KeeperState.AuthFailed, null) );
-                    //TODO 毒丸，入队杀死客户端事件？？
+                    //入队毒丸
                     eventThread.queueEventOfDeath();
                 }
                 if (LOG.isDebugEnabled()) {
@@ -892,6 +907,7 @@ public class ClientCnxn {
                 return;
             }
             if (replyHdr.getXid() == -1) {
+                //事件
                 // -1 means notification
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Got notification sessionid:0x"
@@ -936,23 +952,27 @@ public class ClientCnxn {
                 return;
             }
 
+            //这里是业务响应了
             Packet packet;
             synchronized (pendingQueue) {
                 if (pendingQueue.size() == 0) {
                     throw new IOException("Nothing in the queue, but got "
                             + replyHdr.getXid());
                 }
-                //移除最新的待处理请求
-                //TODO 顺序性保证？？
+                //移除头部第一个packet，匹配最新的响应
+                //这里涉及到zk的消息顺序性保证了
+                //因为连接的是同一台服务器，所以排除了不同服务器性能不同，导致计算时间不同的影响。
+                //同一台服务器，单线程顺序执行，客户端先发送的请求，也会被服务端先收到，也会先计算出响应，先发给客户端。
+                //相当于客户端有序发出请求，服务端按这个顺序处理请求，返回响应。
                 packet = pendingQueue.remove();
             }
             /*
              * Since requests are processed in order, we better get a response
              * to the first request!
-             * 由于请求是按顺序处理的，因此我们最好对第一个请求做出回应！
+             * 由于请求是按顺序发出的，因此收到的这个响应是第一个请求的响应。
              */
             try {
-                //比较事务id
+                //比较事务id，事务id不匹配，也就是请求和响应不匹配
                 if (packet.requestHeader.getXid() != replyHdr.getXid()) {
                     packet.replyHeader.setErr(
                             KeeperException.Code.CONNECTIONLOSS.intValue());
@@ -965,6 +985,7 @@ public class ClientCnxn {
                             + packet );
                 }
 
+                //事务id匹配，就是请求和响应是匹配的
                 packet.replyHeader.setXid(replyHdr.getXid());
                 packet.replyHeader.setErr(replyHdr.getErr());
                 packet.replyHeader.setZxid(replyHdr.getZxid());
@@ -981,6 +1002,7 @@ public class ClientCnxn {
                             + Long.toHexString(sessionId) + ", packet:: " + packet);
                 }
             } finally {
+                //收尾工作，一定执行
                 finishPacket(packet);
             }
         }
@@ -1195,8 +1217,10 @@ public class ClientCnxn {
             final int MAX_SEND_PING_INTERVAL = 10000; //10 seconds
             InetSocketAddress serverAddress = null;
             while (state.isAlive()) {
+                //连接有效时的无限循环
                 try {
                     if (!clientCnxnSocket.isConnected()) {
+                        //未连接，开始建立连接
                         // don't re-establish connection if we are closing
                         if (closing) {
                             break;
@@ -1205,13 +1229,16 @@ public class ClientCnxn {
                             serverAddress = rwServerAddress;
                             rwServerAddress = null;
                         } else {
+                            //选一个随机的服务器
                             serverAddress = hostProvider.next(1000);
                         }
+                        //只连接1台服务器，这里也是请求和响应顺序性的一个保障
                         startConnect(serverAddress);
                         clientCnxnSocket.updateLastSendAndHeard();
                     }
 
                     if (state.isConnected()) {
+                        //已连接
                         // determine whether we need to send an AuthFailed event.
                         if (zooKeeperSaslClient != null) {
                             boolean sendAuthEvent = false;
@@ -1248,10 +1275,13 @@ public class ClientCnxn {
                         }
                         to = readTimeout - clientCnxnSocket.getIdleRecv();
                     } else {
+                        //连接未成功
+                        //配置的连接超时时长 - 距离最后一次发送心跳包过去了多久
                         to = connectTimeout - clientCnxnSocket.getIdleRecv();
                     }
                     
                     if (to <= 0) {
+                        //超时
                         String warnInfo;
                         warnInfo = "Client session timed out, have not heard from server in "
                             + clientCnxnSocket.getIdleRecv()
@@ -1456,6 +1486,7 @@ public class ClientCnxn {
                 warnInfo = "Unable to reconnect to ZooKeeper service, session 0x"
                     + Long.toHexString(sessionId) + " has expired";
                 LOG.warn(warnInfo);
+                //抛会话过期异常
                 throw new SessionExpiredException(warnInfo);
             }
             if (!readOnly && isRO) {

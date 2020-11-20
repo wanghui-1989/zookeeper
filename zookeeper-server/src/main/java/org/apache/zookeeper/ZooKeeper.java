@@ -470,6 +470,9 @@ public class ZooKeeper implements AutoCloseable {
 
             switch (type) {
             case None:
+                //None表示服务器事件、如客户端会话失效，服务器集群只读等
+                //此时会返回所有注册的事件观察者 包括getData, exists, getChildren
+                //默认观察者会被第一个加入，可以在这里做一些处理服务器事件的工作，不向后传播。
                 result.add(defaultWatcher);
                 //禁用自动重置观察者 并且 客户端状态 != 已连接状态
                 //clear为true的话，会清空注册的getData观察者
@@ -3073,6 +3076,7 @@ public class ZooKeeper implements AutoCloseable {
         String clientCnxnSocketName = getClientConfig().getProperty(
                 ZKClientConfig.ZOOKEEPER_CLIENT_CNXN_SOCKET);
         if (clientCnxnSocketName == null) {
+            //默认java原生nio
             clientCnxnSocketName = ClientCnxnSocketNIO.class.getName();
         }
         try {

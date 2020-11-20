@@ -545,16 +545,20 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
                         readLength();
                     } else if (!initialized) {
                         //和服务端建立连接后，initialized会被置为false
-                        //这里相当于建立连接后的第一次读取服务端响应数据，读到的应该是建立连接的结果，比如服务器是否是readOnly
+                        //这里相当于建立连接后的第一次读取服务端响应数据，读到的应该是建立连接的结果，比如服务器是否是readOnly、会话过期等
                         readConnectResult();
                         lenBuffer.clear();
+                        //换回长度buffer
                         incomingBuffer = lenBuffer;
+                        //客户端连接初始化完成
                         initialized = true;
                         updateLastHeard();
                     } else {
+                        //处理服务端响应数据
                         sendThread.readResponse(incomingBuffer);
                         lenBuffer.clear();
                         incomingBuffer = lenBuffer;
+                        //更新心跳
                         updateLastHeard();
                     }
                 }
