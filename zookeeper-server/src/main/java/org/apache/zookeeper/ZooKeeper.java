@@ -1461,6 +1461,15 @@ public class ZooKeeper implements AutoCloseable {
      * Prepend the chroot to the client path (if present). The expectation of
      * this function is that the client path has been validated before this
      * function is called
+     *
+     * 将chroot附加到客户端路径（如果存在）。
+     * 返回值：路径的服务器视图（chroot附加到客户端路径）
+     *
+     * 客户端可以把/做为根目录，或者说是虚拟根路径。然后去设置想获取数据或者监听的路径，比如/client1/name
+     * 服务器端实际根目录不是/，而是/systemName，即实际路径为/systemName/client1/name。
+     * 业务上可以忽略根路径到底是什么，客户端就用/代表根目录。
+     * 在后面的逻辑中，zk代码会处理这个转换，将/根路径，替换为真实的/systemName。
+     *
      * @param clientPath path to the node
      * @return server view of the path (chroot prepended to client path)
      */
@@ -2132,6 +2141,7 @@ public class ZooKeeper implements AutoCloseable {
         PathUtils.validatePath(clientPath);
 
         // the watch contains the un-chroot path
+        // 路径和watch的注册器
         WatchRegistration wcb = null;
         if (watcher != null) {
             wcb = new DataWatchRegistration(watcher, clientPath);

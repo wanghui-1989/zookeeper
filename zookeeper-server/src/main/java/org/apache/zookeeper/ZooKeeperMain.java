@@ -289,6 +289,7 @@ public class ZooKeeperMain {
     }
 
     public static void main(String args[]) throws IOException, InterruptedException {
+        //zk客户端入口
         ZooKeeperMain main = new ZooKeeperMain(args);
         main.run();
     }
