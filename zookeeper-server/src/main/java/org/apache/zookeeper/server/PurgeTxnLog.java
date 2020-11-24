@@ -66,6 +66,9 @@ public class PurgeTxnLog {
      * during this process, these newest N snapshots or any data logs will be
      * excluded from current purging cycle.
      *
+     * 清除快照和日志，并保留最后num个快照和相应的日志。
+     * 如果日志正在滚动或在此过程中创建了新快照，则这些最新的N个快照或任何数据日志将从当前清除周期中排除。
+     *
      * @param dataDir the dir that has the logs
      * @param snapDir the dir that has the snapshots
      * @param num the number of snapshots to keep

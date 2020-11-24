@@ -62,6 +62,11 @@ import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
  * In addition to the config file. There is a file in the data directory called
  * "myid" that contains the server id as an ASCII decimal value.
  *
+ * Quorum:n.法定人数。为了使该会议的会议记录有效，必须出席其任何会议的最小人数的议会或团体。
+ * Peer:n.同辈、对等。adj.对等的、同等的。
+ *
+ * zk集群模式启动类
+ *
  */
 @InterfaceAudience.Public
 public class QuorumPeerMain {
@@ -101,6 +106,8 @@ public class QuorumPeerMain {
             LOG.error("Unexpected exception, exiting abnormally", e);
             System.exit(1);
         }
+
+        //正常退出
         LOG.info("Exiting normally");
         System.exit(0);
     }
@@ -114,17 +121,20 @@ public class QuorumPeerMain {
         }
 
         // Start and schedule the the purge task
+        //启动并调度清除任务，dataDir就是snapDir快照目录
         DatadirCleanupManager purgeMgr = new DatadirCleanupManager(config
                 .getDataDir(), config.getDataLogDir(), config
                 .getSnapRetainCount(), config.getPurgeInterval());
         purgeMgr.start();
 
         if (args.length == 1 && config.isDistributed()) {
+            //集群版
             runFromConfig(config);
         } else {
             LOG.warn("Either no config or no quorum defined in config, running "
                     + " in standalone mode");
             // there is only server in the quorum -- run as standalone
+            //单机版
             ZooKeeperServerMain.main(args);
         }
     }

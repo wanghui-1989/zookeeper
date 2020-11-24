@@ -84,6 +84,8 @@ public class ZooKeeperServerMain {
             LOG.error("Unexpected exception, exiting abnormally", e);
             System.exit(1);
         }
+
+        //正常退出
         LOG.info("Exiting normally");
         System.exit(0);
     }

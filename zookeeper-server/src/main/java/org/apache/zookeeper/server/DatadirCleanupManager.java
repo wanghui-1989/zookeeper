@@ -32,6 +32,10 @@ import org.slf4j.LoggerFactory;
  * 'autopurge.purgeInterval'. It keeps the most recent
  * 'autopurge.snapRetainCount' number of snapshots and corresponding transaction
  * logs.
+ *
+ * 此类通过使用指定的'autopurge.purgeInterval'安排自动清除任务来管理快照和相应事务日志的清除。
+ * 它保留了最新的“ autopurge
+ * .snapRetainCount”快照数量和相应的事务日志。
  */
 public class DatadirCleanupManager {
 
@@ -44,14 +48,17 @@ public class DatadirCleanupManager {
         NOT_STARTED, STARTED, COMPLETED;
     }
 
+    //清除任务运行状态
     private PurgeTaskStatus purgeTaskStatus = PurgeTaskStatus.NOT_STARTED;
 
+    //就是配置中的dataDir
     private final File snapDir;
 
+    //配置中的dataLogDir
     private final File dataLogDir;
-
+    //快照保留数量
     private final int snapRetainCount;
-
+    //快照清除间隔时间 单位：小时
     private final int purgeInterval;
 
     private Timer timer;
@@ -88,6 +95,10 @@ public class DatadirCleanupManager {
      * <code>purgeInterval</code> of <code>0</code> or
      * <code>negative integer</code> will not schedule the purge task.
      * </p>
+     *
+     * 验证清除配置并调度清除任务。清除任务将保留最新的snapRetainCount个快照，
+     * 并在每个purgeInterval小时内删除其余快照。
+     * purgeInterval为0或负整数将不会计划清除任务。
      * 
      * @see PurgeTxnLog#purge(File, File, int)
      */
@@ -104,6 +115,7 @@ public class DatadirCleanupManager {
 
         timer = new Timer("PurgeTask", true);
         TimerTask task = new PurgeTask(dataLogDir, snapDir, snapRetainCount);
+        //schedule fixed rate 固定周期重复任务
         timer.scheduleAtFixedRate(task, 0, TimeUnit.HOURS.toMillis(purgeInterval));
 
         purgeTaskStatus = PurgeTaskStatus.STARTED;

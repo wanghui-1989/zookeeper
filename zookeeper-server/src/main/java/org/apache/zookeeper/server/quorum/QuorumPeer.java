@@ -398,7 +398,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         LOOKING, FOLLOWING, LEADING, OBSERVING;
     }
 
-    /*
+    /**
      * A peer can either be participating, which implies that it is willing to
      * both vote in instances of consensus and to elect or become a Leader, or
      * it may be observing in which case it isn't.
@@ -407,7 +407,11 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
      * conditions change (e.g. which state to become after LOOKING).
      */
     public enum LearnerType {
-        PARTICIPANT, OBSERVER;
+        //统一都叫Learner
+        //Follower有投票权
+        PARTICIPANT,
+        //观察者，无投票权
+        OBSERVER;
     }
 
     /*

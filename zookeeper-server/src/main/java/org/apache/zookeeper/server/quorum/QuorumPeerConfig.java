@@ -791,6 +791,7 @@ public class QuorumPeerConfig {
     public long getServerId() { return serverId; }
 
     public boolean isDistributed() {
+        //quorumVerifier.getVotingMembers().size() > 1 相当于有2个节点就可以启动集群模式
         return quorumVerifier!=null && (!standaloneEnabled || quorumVerifier.getVotingMembers().size() > 1);
     }
 
