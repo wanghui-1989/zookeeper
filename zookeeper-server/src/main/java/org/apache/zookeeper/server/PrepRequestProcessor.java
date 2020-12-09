@@ -87,6 +87,8 @@ import java.util.concurrent.LinkedBlockingQueue;
  * state of the system. It counts on ZooKeeperServer to update
  * outstandingRequests, so that it can take into account transactions that are
  * in the queue to be applied when generating a transaction.
+ *
+ * 在ZooKeeperServer#setupRequestProcessors()中只会实例化一个实例对象，所以这个是单线程的。
  */
 public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
@@ -94,6 +96,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
 
     static boolean skipACL;
     static {
+        //跳过ACL检查，所有的操作都会跳过acl检查
         skipACL = System.getProperty("zookeeper.skipACL", "no").equals("yes");
         if (skipACL) {
             LOG.info("zookeeper.skipACL==\"yes\", ACL checks will be skipped");
@@ -106,10 +109,11 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
      */
     private static  boolean failCreate = false;
 
+    //存放客户端client发过来的请求数据
     LinkedBlockingQueue<Request> submittedRequests = new LinkedBlockingQueue<Request>();
-
+    //责任链，这个类似于filter
     private final RequestProcessor nextProcessor;
-
+    //责任链，这个类似于filterChain
     ZooKeeperServer zks;
 
     public PrepRequestProcessor(ZooKeeperServer zks,
@@ -127,19 +131,24 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
     public static void setFailCreate(boolean b) {
         failCreate = b;
     }
+
     @Override
     public void run() {
         try {
+            //只会创建一个线程，这里可以按照单线程理解
             while (true) {
+                //阻塞拿
                 Request request = submittedRequests.take();
                 long traceMask = ZooTrace.CLIENT_REQUEST_TRACE_MASK;
                 if (request.type == OpCode.ping) {
+                    //客户端ping心跳
                     traceMask = ZooTrace.CLIENT_PING_TRACE_MASK;
                 }
                 if (LOG.isTraceEnabled()) {
                     ZooTrace.logRequest(LOG, traceMask, 'P', request, "");
                 }
                 if (Request.requestOfDeath == request) {
+                    //遇到毒丸，立即退出循环，线程退出。
                     break;
                 }
                 pRequest(request);
@@ -288,10 +297,19 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
      * @param acl:  set of ACLs for the node
      * @param perm: the permission that the client is requesting
      * @param ids:  the credentials supplied by the client
+     *
+     * 根据以下功能授予或拒绝对节点上的操作的授权：
+     *
+     * 参数：
+     * zks –：未使用。
+     * acl –：节点的ACL集
+     * perm–：客户端请求的权限
+     * ids –：客户端提供的凭证
      */
     static void checkACL(ZooKeeperServer zks, List<ACL> acl, int perm,
             List<Id> ids) throws KeeperException.NoAuthException {
         if (skipACL) {
+            //配置的跳过acl检查
             return;
         }
         if (LOG.isDebugEnabled()) {
@@ -304,22 +322,27 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         }
         for (Id authId : ids) {
             if (authId.getScheme().equals("super")) {
+                //scheme为super 超级管理员？
                 return;
             }
         }
         for (ACL a : acl) {
             Id id = a.getId();
             if ((a.getPerms() & perm) != 0) {
+                //是对应的权限，如读写权限等。位运算来验证permission。三要素其一
                 if (id.getScheme().equals("world")
                         && id.getId().equals("anyone")) {
                     return;
                 }
+                //根据scheme获取对应的验证器
                 AuthenticationProvider ap = ProviderRegistry.getProvider(id
                         .getScheme());
                 if (ap != null) {
                     for (Id authId : ids) {
                         if (authId.getScheme().equals(id.getScheme())
                                 && ap.matches(authId.getId(), id.getId())) {
+                            //验证scheme 和 id。三要素其二。
+                            //验证权限的逻辑主要是在matches方法里
                             return;
                         }
                     }
@@ -626,6 +649,13 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         }
     }
 
+    /**
+     * 对客户端创建节点请求做前期处理，主要做了几件事：
+     * 1. 校验路径、ACL
+     * 2. 如果是顺序节点，patch追加parent.cversion后缀。如果是临时节点set客户端sessionId
+     * 3. 根据需要创建的节点类型、内容、version等，生成Record对象，set到request中
+     * 4. 记录节点变化
+     */
     private void pRequest2TxnCreate(int type, Request request, Record record, boolean deserialize) throws IOException, KeeperException {
         if (deserialize) {
             ByteBufferInputStream.byteBuffer2Record(request.request, record);
@@ -651,16 +681,20 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
             data = createRequest.getData();
             ttl = -1;
         }
+        //创建什么样的节点
         CreateMode createMode = CreateMode.fromFlag(flags);
         validateCreateRequest(path, createMode, request, ttl);
         String parentPath = validatePathForCreate(path, request.sessionId);
 
+        //三个值：创建路径；发出请求的客户端提供的权限凭证信息；赋予新节点的acl权限
         List<ACL> listACL = fixupACL(path, request.authInfo, acl);
         ChangeRecord parentRecord = getRecordForPath(parentPath);
-
+        //因为是创建节点，所以acl权限取父节点的权限，验证父节点的权限。
         checkACL(zks, parentRecord.acl, ZooDefs.Perms.CREATE, request.authInfo);
         int parentCVersion = parentRecord.stat.getCversion();
         if (createMode.isSequential()) {
+            //顺序节点的名称，取的是父节点的cversion，即子节点版本号（子节点修改次数，每修改一次值+1）。
+            //从这看，顺序节点的名称不一定是连续的。
             path = path + String.format(Locale.ENGLISH, "%010d", parentCVersion);
         }
         validatePath(path, request.sessionId);
@@ -675,6 +709,8 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         if (ephemeralParent) {
             throw new KeeperException.NoChildrenForEphemeralsException(path);
         }
+
+        //parent.cversion+1
         int newCversion = parentRecord.stat.getCversion()+1;
         if (type == OpCode.createContainer) {
             request.setTxn(new CreateContainerTxn(path, data, listACL, newCversion));
@@ -684,13 +720,18 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
             request.setTxn(new CreateTxn(path, data, listACL, createMode.isEphemeral(),
                     newCversion));
         }
+
         StatPersisted s = new StatPersisted();
         if (createMode.isEphemeral()) {
+            //临时节点，设置ephemeralOwner客户端请求sessionId。
             s.setEphemeralOwner(request.sessionId);
         }
         parentRecord = parentRecord.duplicate(request.getHdr().getZxid());
         parentRecord.childCount++;
+        //更新parent.cversion
         parentRecord.stat.setCversion(newCversion);
+        //一次添加新节点的操作，会导致两个节点有变化，一个是父节点，一个是创建的节点。
+        // 将这两次变化记录添加到zks.outstandingChanges 和 outstandingChangesForPath
         addChangeRecord(parentRecord);
         addChangeRecord(new ChangeRecord(request.getHdr().getZxid(), path, s, 0, listACL));
     }
@@ -726,6 +767,8 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
     /**
      * This method will be called inside the ProcessRequestThread, which is a
      * singleton, so there will be a single thread calling this code.
+     *
+     * 判断request.type，属于客户端的哪一种请求。调用zks.getNextZxid()，拿到递增的zxid，然后处理请求。
      *
      * @param request
      */
@@ -902,6 +945,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
             }
         }
         request.zxid = zks.getZxid();
+        //调用下一个处理器，SyncRequestProcessor
         nextProcessor.processRequest(request);
     }
 
@@ -949,6 +993,14 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
      * @param acls list of ACLs being assigned to the node (create or setACL operation)
      * @return verified and expanded ACLs
      * @throws KeeperException.InvalidACLException
+     *
+     * 此方法检查acl，以确保其不为null或为空，它具有有效的方案和ID，并扩展依赖于请求者的身份验证信息的任何相对ID。
+     *
+     * 参数：
+     * authInfo –与客户端连接关联的ACL ID列表
+     * acls –分配给节点的ACL列表（创建或setACL操作）
+     * 返回值：
+     * 经过验证和扩展的ACL
      */
     private List<ACL> fixupACL(String path, List<Id> authInfo, List<ACL> acls)
         throws KeeperException.InvalidACLException {
@@ -1000,6 +1052,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
     }
 
     public void processRequest(Request request) {
+        //添加到阻塞队列
         submittedRequests.add(request);
     }
 

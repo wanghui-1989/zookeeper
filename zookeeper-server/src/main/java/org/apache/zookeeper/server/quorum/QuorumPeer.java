@@ -143,16 +143,20 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     }
 
     public static class QuorumServer {
+        //集群同步通信地址
         public InetSocketAddress addr = null;
 
+        //选举地址
         public InetSocketAddress electionAddr = null;
-        
+
+        //客户端连接地址
         public InetSocketAddress clientAddr = null;
         
         public long id;
 
         public String hostname;
-        
+
+        //默认Follower
         public LearnerType type = LearnerType.PARTICIPANT;
         
         private List<InetSocketAddress> myAddrs;
@@ -885,9 +889,11 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
     @Override
     public synchronized void start() {
+        //判断当前myid是否在zk服务器列表中
         if (!getView().containsKey(myid)) {
             throw new RuntimeException("My id " + myid + " not in the peer list");
-         }
+        }
+        //加载磁盘快照和提交日志，生成内存DataTree
         loadDataBase();
         startServerCnxnFactory();
         try {
@@ -900,14 +906,19 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         super.start();
     }
 
+    //主要就是加载磁盘中的快照和commitlog到内存，组装DataTree，获取epoch
     private void loadDataBase() {
         try {
+            //加载快照和事务日志，组成DataTree，存于内存
+            //数据加载完成后，会得到最新的zxid
             zkDb.loadDataBase();
 
             // load the epochs
             long lastProcessedZxid = zkDb.getDataTree().lastProcessedZxid;
+            //内存中的epoch
             long epochOfZxid = ZxidUtils.getEpochFromZxid(lastProcessedZxid);
             try {
+                //从固定的磁盘路径snapDir/currentEpoch读取epoch
                 currentEpoch = readLongFromFile(CURRENT_EPOCH_FILENAME);
             } catch(FileNotFoundException e) {
             	// pick a reasonable epoch number
@@ -919,10 +930,15 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             	        currentEpoch);
             	writeLongToFile(CURRENT_EPOCH_FILENAME, currentEpoch);
             }
+
             if (epochOfZxid > currentEpoch) {
+                //内存中的epoch > 磁盘中的epoch
                 throw new IOException("The current epoch, " + ZxidUtils.zxidToString(currentEpoch) + ", is older than the last zxid, " + lastProcessedZxid);
             }
+
+            //下面是内存中的epoch <= 磁盘中的epoch
             try {
+                //从固定的磁盘路径snapDir/acceptedEpoch读取epoch
                 acceptedEpoch = readLongFromFile(ACCEPTED_EPOCH_FILENAME);
             } catch(FileNotFoundException e) {
             	// pick a reasonable epoch number
@@ -934,6 +950,8 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             	        acceptedEpoch);
             	writeLongToFile(ACCEPTED_EPOCH_FILENAME, acceptedEpoch);
             }
+
+            //要求磁盘中的currentEpoch <= 磁盘中的acceptedEpoch
             if (acceptedEpoch < currentEpoch) {
                 throw new IOException("The accepted epoch, " + ZxidUtils.zxidToString(acceptedEpoch) + " is less than the current epoch, " + ZxidUtils.zxidToString(currentEpoch));
             }

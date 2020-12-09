@@ -26,6 +26,8 @@ import org.apache.zookeeper.server.ZooKeeperServer;
  * We use this class when we wish to disable the AdminServer. (This way we only
  * have to consider whether the server is enabled when we create the
  * AdminServer, which is handled by AdminServerFactory.)
+ * Dummy:adj.假的、虚设的
+ * 内部都是空实现
  */
 public class DummyAdminServer implements AdminServer {
     @Override

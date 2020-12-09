@@ -32,6 +32,7 @@ import org.apache.zookeeper.server.quorum.QuorumPeer.QuorumServer;
 
 public interface QuorumVerifier {
     long getWeight(long id);
+    //入参set是否达到半数
     boolean containsQuorum(Set<Long> set);
     long getVersion();
     void setVersion(long ver);

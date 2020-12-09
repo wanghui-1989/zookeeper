@@ -88,6 +88,9 @@ public class ZooDefs {
         public final int error = -1;
     }
 
+    /**
+     * 位运算
+     */
     @InterfaceAudience.Public
     public interface Perms {
         int READ = 1 << 0;

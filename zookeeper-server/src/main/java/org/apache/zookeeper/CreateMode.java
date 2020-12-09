@@ -29,20 +29,28 @@ public enum CreateMode {
     
     /**
      * The znode will not be automatically deleted upon client's disconnect.
+     * 持久节点
+     * 客户端断开连接后，znode不会自动删除
      */
     PERSISTENT (0, false, false, false, false),
     /**
     * The znode will not be automatically deleted upon client's disconnect,
     * and its name will be appended with a monotonically increasing number.
+     * 持久顺序节点
+     * 客户端断开连接后，znode不会自动删除，并且其名称将附加一个单调递增的数字。
     */
     PERSISTENT_SEQUENTIAL (2, false, true, false, false),
     /**
      * The znode will be deleted upon the client's disconnect.
+     * 临时节点
+     * 客户端断开连接后，znode将被删除。
      */
     EPHEMERAL (1, true, false, false, false),
     /**
      * The znode will be deleted upon the client's disconnect, and its name
      * will be appended with a monotonically increasing number.
+     * 临时顺序节点
+     * 客户端断开连接后，znode将被删除，并且其名称将附加一个单调递增的数字。
      */
     EPHEMERAL_SEQUENTIAL (3, true, true, false, false),
     /**
@@ -53,12 +61,19 @@ public enum CreateMode {
      * Given this property, you should be prepared to get
      * {@link org.apache.zookeeper.KeeperException.NoNodeException}
      * when creating children inside of this container node.
+     *
+     * znode将是一个容器节点。 容器节点是特殊用途的节点，可用于配方（如领导者，锁等）。
+     * 删除容器的最后一个子容器时，容器将成为服务器将来要删除的候选对象。
+     * 给定此属性，您应该准备在此容器节点内创建子级时获取KeeperException.NoNodeException。
      */
     CONTAINER (4, false, false, true, false),
     /**
      * The znode will not be automatically deleted upon client's disconnect.
      * However if the znode has not been modified within the given TTL, it
      * will be deleted once it has no children.
+     *
+     * 客户端断开连接后，znode不会自动删除。
+     * 但是，如果尚未在给定的TTL范围内修改znode，则它将在没有子节点后将其删除。
      */
     PERSISTENT_WITH_TTL(5, false, false, false, true),
     /**
@@ -66,6 +81,8 @@ public enum CreateMode {
      * and its name will be appended with a monotonically increasing number.
      * However if the znode has not been modified within the given TTL, it
      * will be deleted once it has no children.
+     * 客户端断开连接后，znode不会自动删除，并且其名称将附加一个单调递增的数字。
+     * 但是，如果尚未在给定的TTL范围内修改znode，则它将在没有子节点后将其删除。
      */
     PERSISTENT_SEQUENTIAL_WITH_TTL(6, false, true, false, true);
 

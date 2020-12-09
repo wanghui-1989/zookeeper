@@ -176,6 +176,7 @@ public class QuorumPeerMain {
               config.isLocalSessionsUpgradingEnabled());
           //quorumPeer.setQuorumPeers(config.getAllMembers());
           quorumPeer.setElectionType(config.getElectionAlg());
+          //myid
           quorumPeer.setMyid(config.getServerId());
           quorumPeer.setTickTime(config.getTickTime());
           quorumPeer.setMinSessionTimeout(config.getMinSessionTimeout());

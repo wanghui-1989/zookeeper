@@ -40,6 +40,7 @@ public class ZooKeeperThread extends Thread {
 
     public ZooKeeperThread(String threadName) {
         super(threadName);
+        //set线程未捕获异常处理器
         setUncaughtExceptionHandler(uncaughtExceptionalHandler);
     }
 

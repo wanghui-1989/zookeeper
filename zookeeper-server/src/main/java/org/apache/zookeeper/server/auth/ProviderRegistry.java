@@ -41,10 +41,14 @@ public class ProviderRegistry {
             DigestAuthenticationProvider digp = new DigestAuthenticationProvider();
             authenticationProviders.put(ipp.getScheme(), ipp);
             authenticationProviders.put(digp.getScheme(), digp);
+            //可以在运行参数中注册自定义的acl权限验证器
             Enumeration<Object> en = System.getProperties().keys();
             while (en.hasMoreElements()) {
                 String k = (String) en.nextElement();
                 if (k.startsWith("zookeeper.authProvider.")) {
+                    //自定义的acl权限验证器参数名要以zookeeper.authProvider.开头
+                    //value为class名称
+                    //这个方式不太好，不如SPI的扩展性强
                     String className = System.getProperty(k);
                     try {
                         Class<?> c = ZooKeeperServer.class.getClassLoader()

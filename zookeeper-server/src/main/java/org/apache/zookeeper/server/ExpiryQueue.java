@@ -33,14 +33,37 @@ import org.apache.zookeeper.common.Time;
  * ExpiryQueue tracks elements in time sorted fixed duration buckets.
  * It's used by SessionTrackerImpl to expire sessions and NIOServerCnxnFactory
  * to expire connections.
+ * ExpiryQueue跟踪按时间排序的固定持续时间段中的元素。
+ * SessionTrackerImpl使用它来终止会话，而NIOServerCnxnFactory使用它来终止连接。
+ *
+ * 算法实现的关键是两个map，一个elemMap，一个expiryMap。
+ * 添加和删除元素都涉及到两个map，相当于两部操作。
+ * 添加：
+ *  1. 计算元素的下一个过期时间点，放入elemMap。
+ *  2. 使用该过期时间点，调用expiryMap.get，获取相同过期时间的元素集合，放入集合中。
+ *
+ * 删除：
+ *  1. 调用elemMap.get，获取元素对应的过期时间点。存在的话删除，不存在的话返回。
+ *  2. 使用该过期时间点调用expiryMap.get，获取相同过期时间点的集合。
+ *  3. 从集合中移除该对象。
+ *
+ * 相当于根据固定的过期间隔时间，来分组，然后管理过期元素。
+ *
  */
 public class ExpiryQueue<E> {
+
+    /**
+     * key：存储的元素对象。value：该对象对应的过期时间点。
+     */
     private final ConcurrentHashMap<E, Long> elemMap =
         new ConcurrentHashMap<E, Long>();
     /**
      * The maximum number of buckets is equal to max timeout/expirationInterval,
      * so the expirationInterval should not be too small compared to the
      * max timeout that this expiry queue needs to maintain.
+     *
+     * key：某一个过期时间点，一般为未来的某个时间。
+     * value：具有相同过期时间点的元素对象集合。
      */
     private final ConcurrentHashMap<Long, Set<E>> expiryMap =
         new ConcurrentHashMap<Long, Set<E>>();
@@ -80,7 +103,7 @@ public class ExpiryQueue<E> {
      * Adds or updates expiration time for element in queue, rounding the
      * timeout to the expiry interval bucketed used by this queue.
      * @param elem     element to add/update
-     * @param timeout  timout in milliseconds
+     * @param timeout  timout in milliseconds.超时时长，不是时间点。
      * @return         time at which the element is now set to expire if
      *                 changed, or null if unchanged
      */
@@ -88,7 +111,7 @@ public class ExpiryQueue<E> {
         Long prevExpiryTime = elemMap.get(elem);
         long now = Time.currentElapsedTime();
         Long newExpiryTime = roundToNextInterval(now + timeout);
-
+        //计算新的过期事件点，判断是否和原时间点相同
         if (newExpiryTime.equals(prevExpiryTime)) {
             // No change, so nothing to update
             return null;

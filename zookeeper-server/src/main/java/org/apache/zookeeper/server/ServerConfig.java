@@ -38,11 +38,17 @@ public class ServerConfig {
     //// If you update the configuration parameters be sure
     //// to update the "conf" 4letter word
     ////
+    //客户端通信端口号
     protected InetSocketAddress clientPortAddress;
+    //https
     protected InetSocketAddress secureClientPortAddress;
+    //snapDir
     protected File dataDir;
+    //dataLogDir
     protected File dataLogDir;
+    //心跳时间，毫秒，缺省3000
     protected int tickTime = ZooKeeperServer.DEFAULT_TICK_TIME;
+    //最大客户的连接数
     protected int maxClientCnxns;
     /** defaults to -1 if not set explicitly */
     protected int minSessionTimeout = -1;

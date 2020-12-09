@@ -100,6 +100,7 @@ public class JettyAdminServer implements AdminServer {
     @Override
     public void start() throws AdminServerException {
         try {
+            //启动jetty服务器
             server.start();
         } catch (Exception e) {
             // Server.start() only throws Exception, so let's at least wrap it

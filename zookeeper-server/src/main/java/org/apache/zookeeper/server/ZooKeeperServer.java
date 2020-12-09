@@ -78,6 +78,9 @@ import org.slf4j.LoggerFactory;
  * This class implements a simple standalone ZooKeeperServer. It sets up the
  * following chain of RequestProcessors to process requests:
  * PrepRequestProcessor -> SyncRequestProcessor -> FinalRequestProcessor
+ *
+ * 单例ZooKeeperServer。
+ * 重点在单例，服务端只会创建一个实例对象。
  */
 public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     protected static final Logger LOG;
@@ -99,9 +102,17 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     protected int maxSessionTimeout = -1;
     protected SessionTracker sessionTracker;
     private FileTxnSnapLog txnLogFactory = null;
+    //zk存储的数据，在内存中。
     private ZKDatabase zkDb;
+    //该zkserver的id序列，类似于mysql某一张表的主键id序列
     private final AtomicLong hzxid = new AtomicLong(0);
     public final static Exception ok = new Exception("No prob");
+    /**
+     * 处理器顺序:
+     *  firstProcessor(PrepRequestProcessor)
+     *       ->  syncProcessor(SyncRequestProcessor)
+     *            -> finalProcessor(FinalRequestProcessor)
+     */
     protected RequestProcessor firstProcessor;
     protected volatile State state = State.INITIAL;
 
@@ -464,6 +475,13 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         notifyAll();
     }
 
+    //
+    /**
+     * 处理器顺序:
+     *  firstProcessor(PrepRequestProcessor)
+     *       ->  syncProcessor(SyncRequestProcessor)
+     *            -> finalProcessor(FinalRequestProcessor)
+     */
     protected void setupRequestProcessors() {
         RequestProcessor finalProcessor = new FinalRequestProcessor(this);
         RequestProcessor syncProcessor = new SyncRequestProcessor(this,
@@ -674,6 +692,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             // Possible since it's just deserialized from a packet on the wire.
             passwd = new byte[0];
         }
+        //TODO 后面看下这个逻辑
         long sessionId = sessionTracker.createSession(timeout);
         Random r = new Random(sessionId ^ superSecret);
         r.nextBytes(passwd);
@@ -811,9 +830,13 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
             }
         }
         try {
+            //TODO 待定？？
             touch(si.cnxn);
             boolean validpacket = Request.isValid(si.type);
             if (validpacket) {
+                //责任链模式，处理请求
+                //第一个处理器是PrepRequestProcessor，内部有一个LinkedBlockingQueue，请求会先提交到队列中。
+                //相当于此处是开始由netty多线程转为PrepRequestProcessor单线程了
                 firstProcessor.processRequest(si);
                 if (si.cnxn != null) {
                     incInProcess();
@@ -1005,6 +1028,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         }
         boolean readOnly = false;
         try {
+            //读取服务端状态
             readOnly = bia.readBool("readOnly");
             cnxn.isOldClient = false;
         } catch (IOException e) {
@@ -1082,6 +1106,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     }
 
     public void processPacket(ServerCnxn cnxn, ByteBuffer incomingBuffer) throws IOException {
+        //处理客户端请求
         // We have the request, now process and setup for next
         InputStream bais = new ByteBufferInputStream(incomingBuffer);
         BinaryInputArchive bia = BinaryInputArchive.getArchive(bais);
@@ -1092,6 +1117,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
         // to the start of the txn
         incomingBuffer = incomingBuffer.slice();
         if (h.getType() == OpCode.auth) {
+            //acl
             LOG.info("got auth packet " + cnxn.getRemoteSocketAddress());
             AuthPacket authPacket = new AuthPacket();
             ByteBufferInputStream.byteBuffer2Record(incomingBuffer, authPacket);
@@ -1139,12 +1165,15 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
                 return;
             }
             else {
+                //这里是业务请求了
+                //h.getXid就是获取客户端生成的事务id
                 Request si = new Request(cnxn, cnxn.getSessionId(), h.getXid(),
                   h.getType(), incomingBuffer, cnxn.getAuthInfo());
                 si.setOwner(ServerCnxn.me);
                 // Always treat packet from the client as a possible
                 // local request.
                 setLocalSessionFlag(si);
+                //开始处理请求
                 submitRequest(si);
             }
         }

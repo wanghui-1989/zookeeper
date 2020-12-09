@@ -75,6 +75,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * The tree maintains two parallel data structures: a hashtable that maps from
  * full paths to DataNodes and a tree of DataNodes. All accesses to a path is
  * through the hashtable. The tree is traversed only when serializing to disk.
+ *
+ * 此类维护树数据结构。 它没有任何网络或客户端连接代码，因此可以以独立方式进行测试。
+ * 该树维护两个并行的数据结构：从完整路径映射到DataNode的哈希表和DataNode的树。
+ * 对路径的所有访问都是通过哈希表进行的。 仅在序列化到磁盘时遍历该树。
  */
 public class DataTree {
     private static final Logger LOG = LoggerFactory.getLogger(DataTree.class);
@@ -82,6 +86,12 @@ public class DataTree {
     /**
      * This hashtable provides a fast lookup to the datanodes. The tree is the
      * source of truth and is where all the locking occurs
+     *
+     * 该哈希表可快速查找数据节点。 树是真理的源头，是所有锁定发生的地方。
+     *
+     * TODO:再看下ConcurrentHashMap的源码？？
+     * 从这里看，zk没有实现自己的树结构，而是使用ConcurrentHashMap来存储树。
+     * zk是读多于写的，从这点来讲，使用jdk1.8以上版本性能会更好，因为jdk1.8的实现是红黑树，之前是链表。
      */
     private final ConcurrentHashMap<String, DataNode> nodes =
         new ConcurrentHashMap<String, DataNode>();
@@ -225,6 +235,7 @@ public class DataTree {
 
     public DataTree() {
         /* Rather than fight it, let root have an alias */
+        //空串和/都对应根节点
         nodes.put("", root);
         nodes.put(rootZookeeper, root);
 

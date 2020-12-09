@@ -75,6 +75,7 @@ public class QuorumMaj implements QuorumVerifier {
                 observingMembers.put(Long.valueOf(qs.id), qs);
             }
         }
+        //半数 向下取整
         half = votingMembers.size() / 2;
     }
 

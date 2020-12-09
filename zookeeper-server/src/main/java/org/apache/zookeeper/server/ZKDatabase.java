@@ -233,11 +233,15 @@ public class ZKDatabase {
     /**
      * load the database from the disk onto memory and also add
      * the transactions to the committedlog in memory.
+     *
+     * 从磁盘将数据库加载到内存中，并将事务添加到内存中的committedlog中。
+     * 返回值：磁盘上的最后一个有效zxid
      * @return the last valid zxid on disk
      * @throws IOException
      */
     public long loadDataBase() throws IOException {
         long zxid = snapLog.restore(dataTree, sessionsWithTimeouts, commitProposalPlaybackListener);
+        //初始化阶段结束
         initialized = true;
         return zxid;
     }

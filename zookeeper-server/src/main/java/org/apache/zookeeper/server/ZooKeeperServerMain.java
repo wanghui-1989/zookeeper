@@ -136,13 +136,17 @@ public class ZooKeeperServerMain {
                     new ZooKeeperServerShutdownHandler(shutdownLatch));
 
             // Start Admin server
+            //默认启动jetty服务器
             adminServer = AdminServerFactory.createAdminServer();
             adminServer.setZooKeeperServer(zkServer);
+            //启动jetty服务器
             adminServer.start();
 
             boolean needStartZKServer = true;
             if (config.getClientPortAddress() != null) {
+                //配置的zk客户端连接的端口号，默认为2181
                 cnxnFactory = ServerCnxnFactory.createFactory();
+                //配置了最大的客户端连接数，默认60
                 cnxnFactory.configure(config.getClientPortAddress(), config.getMaxClientCnxns(), false);
                 cnxnFactory.startup(zkServer);
                 // zkServer has been started. So we don't need to start it again in secureCnxnFactory.

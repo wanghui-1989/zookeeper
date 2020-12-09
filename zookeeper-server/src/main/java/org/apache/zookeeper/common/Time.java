@@ -20,6 +20,9 @@ package org.apache.zookeeper.common;
 
 import java.util.Date;
 
+/**
+ * 时间工具，因为System.nanoTime()的特殊性，需要做一些转化。
+ */
 public class Time {
     /**
      * Returns time in milliseconds as does System.currentTimeMillis(),

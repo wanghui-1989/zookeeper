@@ -55,7 +55,9 @@ public class NettyServerCnxn extends ServerCnxn {
     private static final Logger LOG = LoggerFactory.getLogger(NettyServerCnxn.class);
     private final Channel channel;
     private CompositeByteBuf queuedBuffer;
+    //throttle: v.掐死 相当于不接收数据了
     private final AtomicBoolean throttled = new AtomicBoolean(false);
+    //用于接收客户端请求数据
     private ByteBuffer bb;
     private final ByteBuffer bbLen = ByteBuffer.allocate(4);
     private long sessionId;
@@ -339,6 +341,7 @@ public class NettyServerCnxn extends ServerCnxn {
         }
 
         if (throttled.get()) {
+            //不接收数据了
             LOG.debug("Received message while throttled");
             // we are throttled, so we need to queue
             if (queuedBuffer == null) {
@@ -357,6 +360,7 @@ public class NettyServerCnxn extends ServerCnxn {
                 appendToQueuedBuffer(buf.retainedDuplicate());
                 processQueuedBuffer();
             } else {
+                //最初始的时候应该走这里
                 receiveMessage(buf);
                 // Have to check !closingChannel, because an error in
                 // receiveMessage() could have led to close() being called.
@@ -428,11 +432,15 @@ public class NettyServerCnxn extends ServerCnxn {
      * Note that this method does not call <code>message.release()</code>. The
      * caller is responsible for making sure the message is released after this
      * method returns.
+     * 先初始化bb，然后读取数据。
+     * initialized=false时，是初始数据，读到的是服务端zk的读写状态等。
+     * initialized=true时，是请求数据。
      * @param message the message bytes to process.
      */
     private void receiveMessage(ByteBuf message) {
         checkIsInEventLoop("receiveMessage");
         try {
+            //还可读 并且 没掐死
             while(message.isReadable() && !throttled.get()) {
                 if (bb != null) {
                     if (LOG.isTraceEnabled()) {
@@ -473,15 +481,18 @@ public class NettyServerCnxn extends ServerCnxn {
                         if (zks == null || !zks.isRunning()) {
                             throw new IOException("ZK down");
                         }
+                        //initialized默认false
                         if (initialized) {
                             // TODO: if zks.processPacket() is changed to take a ByteBuffer[],
                             // we could implement zero-copy queueing.
+                            //读取的是发来的请求数据
                             zks.processPacket(this, bb);
 
                             if (zks.shouldThrottle(outstandingCount.incrementAndGet())) {
                                 disableRecvNoWait();
                             }
                         } else {
+                            //读取的是服务器zk的状态，如r/w等
                             if (LOG.isDebugEnabled()) {
                                 LOG.debug("got conn req request from {}",
                                         getRemoteSocketAddress());
