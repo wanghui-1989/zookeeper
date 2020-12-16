@@ -94,6 +94,7 @@ public class FileTxnLog implements TxnLog, Closeable {
 
     private static final Logger LOG;
 
+    //魔数 ZKLG四个字节字符串转为int
     public final static int TXNLOG_MAGIC =
         ByteBuffer.wrap("ZKLG".getBytes()).getInt();
 
@@ -199,6 +200,8 @@ public class FileTxnLog implements TxnLog, Closeable {
      * @param hdr the header of the transaction
      * @param txn the transaction part of the entry
      * returns true iff something appended, otw false
+     *
+     * 追加的格式如类头注释
      */
     public synchronized boolean append(TxnHeader hdr, Record txn)
         throws IOException
@@ -206,6 +209,7 @@ public class FileTxnLog implements TxnLog, Closeable {
         if (hdr == null) {
             return false;
         }
+        //追加的事务id一定要大于最后写入的事务id（即为最大值）
         if (hdr.getZxid() <= lastZxidSeen) {
             LOG.warn("Current zxid " + hdr.getZxid()
                     + " is <= " + lastZxidSeen + " for "
@@ -213,31 +217,43 @@ public class FileTxnLog implements TxnLog, Closeable {
         } else {
             lastZxidSeen = hdr.getZxid();
         }
+
         if (logStream==null) {
            if(LOG.isInfoEnabled()){
                 LOG.info("Creating new log file: " + Util.makeLogName(hdr.getZxid()));
            }
 
+           //构建文件名，logDir/log.十六进制zxid
            logFileWrite = new File(logDir, Util.makeLogName(hdr.getZxid()));
            fos = new FileOutputStream(logFileWrite);
            logStream=new BufferedOutputStream(fos);
            oa = BinaryOutputArchive.getArchive(logStream);
+           //文件头由 魔数、版本号、dbid 组成
            FileHeader fhdr = new FileHeader(TXNLOG_MAGIC,VERSION, dbId);
+           //序列化文件头
            fhdr.serialize(oa, "fileheader");
            // Make sure that the magic number is written before padding.
+           // 现在就先把文件头刷到磁盘
            logStream.flush();
+           //写了多少字节
            filePadding.setCurrentSize(fos.getChannel().position());
+           //先不刷其他数据，暂时将数据保存到待flush列表里面，等待统一批量flush多个文件的内容
            streamsToFlush.add(fos);
         }
+        //计算空白补位，填充
         filePadding.padFile(fos.getChannel());
+        //将事务头和事务数据序列化到字节缓冲区
         byte[] buf = Util.marshallTxnEntry(hdr, txn);
         if (buf == null || buf.length == 0) {
             throw new IOException("Faulty serialization for header " +
                     "and txn");
         }
+        //校验码
         Checksum crc = makeChecksumAlgorithm();
         crc.update(buf, 0, buf.length);
+        //写校验码
         oa.writeLong(crc.getValue(), "txnEntryCRC");
+        //写数据
         Util.writeTxnBytes(oa, buf);
 
         return true;
@@ -328,6 +344,7 @@ public class FileTxnLog implements TxnLog, Closeable {
             logStream.flush();
         }
         for (FileOutputStream log : streamsToFlush) {
+            //flush文件内容到磁盘
             log.flush();
             if (forceSync) {
                 long startSyncNS = System.nanoTime();
@@ -349,6 +366,7 @@ public class FileTxnLog implements TxnLog, Closeable {
                 }
             }
         }
+        //刷新完 关闭流
         while (streamsToFlush.size() > 1) {
             streamsToFlush.removeFirst().close();
         }

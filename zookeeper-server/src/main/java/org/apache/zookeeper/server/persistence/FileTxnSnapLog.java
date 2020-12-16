@@ -394,15 +394,28 @@ public class FileTxnSnapLog {
      * @param dataTree the datatree to be serialized onto disk
      * @param sessionsWithTimeouts the session timeouts to be
      * serialized onto disk
+     *
+     * 将数据树和会话保存到快照中。
+     * 从这看出快照是对内存树做快照，不是磁盘，
+     * 也可以推断出zk是将所有数据都加载到内存中了，对内存大小要求较高，
+     * 有点类似简化版的redis了，在redis基础上添加了通知功能。
+     *
+     * 参数：
+     * dataTree 要序列化到磁盘上的数据树
+     * sessionsWithTimeouts 要序列化的会话和会话超时时间
+     *
      * @throws IOException
      */
     public void save(DataTree dataTree,
             ConcurrentHashMap<Long, Integer> sessionsWithTimeouts)
         throws IOException {
+        //使用lastZxid来确定快照范围和定义快照文件路径
         long lastZxid = dataTree.lastProcessedZxid;
+        //快照文件名：snapDir/snapshot.zxid十六进制字符串
         File snapshotFile = new File(snapDir, Util.makeSnapshotName(lastZxid));
         LOG.info("Snapshotting: 0x{} to {}", Long.toHexString(lastZxid),
                 snapshotFile);
+        //开始序列化
         snapLog.serialize(dataTree, sessionsWithTimeouts, snapshotFile);
 
     }

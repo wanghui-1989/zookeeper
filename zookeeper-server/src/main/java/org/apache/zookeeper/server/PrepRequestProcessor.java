@@ -89,6 +89,8 @@ import java.util.concurrent.LinkedBlockingQueue;
  * in the queue to be applied when generating a transaction.
  *
  * 在ZooKeeperServer#setupRequestProcessors()中只会实例化一个实例对象，所以这个是单线程的。
+ *
+ * 可以叫做 请求预处理器，先对请求做一些处理，然后向下传。
  */
 public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
@@ -651,13 +653,15 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
 
     /**
      * 对客户端创建节点请求做前期处理，主要做了几件事：
-     * 1. 校验路径、ACL
+     * 1. 反序列化请求data，校验路径、ACL
      * 2. 如果是顺序节点，patch追加parent.cversion后缀。如果是临时节点set客户端sessionId
      * 3. 根据需要创建的节点类型、内容、version等，生成Record对象，set到request中
      * 4. 记录节点变化
+     * 注意 这里还没有将新的节点加入到内存树中，也就是在内存树上还没有新节点。
      */
     private void pRequest2TxnCreate(int type, Request request, Record record, boolean deserialize) throws IOException, KeeperException {
         if (deserialize) {
+            //反序列化请求data到record中
             ByteBufferInputStream.byteBuffer2Record(request.request, record);
         }
 
@@ -769,6 +773,8 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
      * singleton, so there will be a single thread calling this code.
      *
      * 判断request.type，属于客户端的哪一种请求。调用zks.getNextZxid()，拿到递增的zxid，然后处理请求。
+     * 这里的操作不会对内存树有影响，也就是操作结果不会在内存树生效。只是得到数据应该是什么样，比如创建的节点名称是什么等等。
+     * 可以反向思考，现在还没有投票，如果生效了那客户端在这个节点中就可以看到数据了，而其他节点还没有，违反一致性。
      *
      * @param request
      */

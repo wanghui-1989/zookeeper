@@ -92,6 +92,13 @@ public class DataTree {
      * TODO:再看下ConcurrentHashMap的源码？？
      * 从这里看，zk没有实现自己的树结构，而是使用ConcurrentHashMap来存储树。
      * zk是读多于写的，从这点来讲，使用jdk1.8以上版本性能会更好，因为jdk1.8的实现是红黑树，之前是链表。
+     *
+     * 因为它不是真正的树，所以在节点层级上，权限ACL控制会有问题。
+     * 比如访问权限，路径/p/c  假如设置/p不可访问，/c可以访问。
+     * 从文件树来说我们设置了父文件夹不可访问，对应的子文件一定不可以访问，所以上面说的权限设置不能实现。
+     * 然而zk的树因为不是真的按树层级遍历路径（或者说树的层级遍历源码由jdk控制，没有提供扩展，外部无法改变），而是map，
+     * 所以设置/p不可访问，/c可以访问应该是能实现的，而且/p/c的确可以访问，
+     * 因为根本就没有先判断父路径/p的权限，而是直接map定位目标路径，相当于绕过了父路径权限，严格讲可以算是漏洞。
      */
     private final ConcurrentHashMap<String, DataNode> nodes =
         new ConcurrentHashMap<String, DataNode>();
@@ -219,6 +226,8 @@ public class DataTree {
     /**
      * This is a pointer to the root of the DataTree. It is the source of truth,
      * but we usually use the nodes hashmap to find nodes in the tree.
+     *
+     * DataTree根节点
      */
     private DataNode root = new DataNode(new byte[0], -1L, new StatPersisted());
 
@@ -426,6 +435,7 @@ public class DataTree {
 
     /**
      * Add a new node to the DataTree.
+     * 更新内存树了
      * @param path
      * 			  Path for the new node.
      * @param data
@@ -477,8 +487,11 @@ public class DataTree {
             parent.stat.setCversion(parentCVersion);
             parent.stat.setPzxid(zxid);
             Long longval = aclCache.convertAcls(acl);
+            //创建新节点
             DataNode child = new DataNode(data, longval, stat);
+            //加到parent.children中
             parent.addChild(childName);
+            //放到树中，即ConcurrentHashMap中
             nodes.put(path, child);
             EphemeralType ephemeralType = EphemeralType.get(ephemeralOwner);
             if (ephemeralType == EphemeralType.CONTAINER) {
@@ -1182,6 +1195,12 @@ public class DataTree {
      * this method uses a stringbuilder to create a new path for children. This
      * is faster than string appends ( str1 + str2).
      *
+     * 这里是zk快照核心逻辑：
+     *  从DataTree的根节点开始，使用前序遍历的方式，访问每一个节点，序列化节点的路径和对应数据到磁盘。
+     *  相当于使用前序遍历的方式，将内存中的整个树序列化到磁盘。
+     *
+     * TODO 这里要考虑多线程同时操作数据的问题，在快照线程序列化的过程中，其他线程修改了某一节点的数据，这时会不会有问题？？
+     *
      * @param oa
      *            OutputArchive to write to.
      * @param path
@@ -1190,13 +1209,17 @@ public class DataTree {
      * @throws InterruptedException
      */
     void serializeNode(OutputArchive oa, StringBuilder path) throws IOException {
+        //开始拍摄快照时，第一次传入的path为""
+        //DataTree在构造的时候，空字符串和/都对应根节点
         String pathString = path.toString();
+        //第一次取出来的是根节点
         DataNode node = getNode(pathString);
         if (node == null) {
             return;
         }
         String children[] = null;
         DataNode nodeCopy;
+        //节点锁，使用要序列化的节点作为锁
         synchronized (node) {
             StatPersisted statCopy = new StatPersisted();
             copyStatPersisted(node.stat, statCopy);
@@ -1204,17 +1227,21 @@ public class DataTree {
             //are never changed
             nodeCopy = new DataNode(node.data, node.acl, statCopy);
             Set<String> childs = node.getChildren();
+            //拿到所有子节点，遍历使用
             children = childs.toArray(new String[childs.size()]);
         }
+        //序列化path和对应节点
         serializeNodeData(oa, pathString, nodeCopy);
         path.append('/');
         int off = path.length();
+        //遍历所有子节点，序列化
         for (String child : children) {
             // since this is single buffer being resused
             // we need
             // to truncate the previous bytes of string.
             path.delete(off, Integer.MAX_VALUE);
             path.append(child);
+            //递归序列化，类似于树的前序遍历
             serializeNode(oa, path);
         }
     }
@@ -1226,7 +1253,9 @@ public class DataTree {
     }
 
     public void serialize(OutputArchive oa, String tag) throws IOException {
+        //序列化acl
         aclCache.serialize(oa);
+        //序列化节点
         serializeNode(oa, new StringBuilder(""));
         // / marks end of stream
         // we need to check if clear had been called in between the snapshot.

@@ -53,6 +53,10 @@ import org.slf4j.LoggerFactory;
  * 3.Observer - 将提交的请求同步到磁盘（作为INFORM数据包接收）。
  *     它永远不会将确认发送回给领导者，因此nextProcessor将为null。
  *     因为它只包含提交的txns，所以这改变了观察者上txnlog的语义。
+ *
+ * 可以叫做 同步请求处理器。同步请求日志到磁盘，同步请求到其他服务器，包括投票。
+ *
+ * 只会创建一个，可以当做单线程来理解。
  */
 public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
@@ -69,11 +73,15 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
      * Transactions that have been written and are waiting to be flushed to
      * disk. Basically this is the list of SyncItems whose callbacks will be
      * invoked after flush returns successfully.
+     *
+     * 已写入并等待刷新到磁盘的事务。
+     * 基本上，这是同步项目列表，在刷新成功返回后，将调用这些回调的回调。
      */
     private final LinkedList<Request> toFlush = new LinkedList<Request>();
     private final Random r = new Random();
     /**
      * The number of log entries to log before starting a snapshot
+     * 开始快照之前要记录的日志条目数
      */
     private static int snapCount = ZooKeeperServer.getSnapCount();
 
@@ -112,10 +120,12 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
 
             // we do this in an attempt to ensure that not all of the servers
             // in the ensemble take a snapshot at the same time
+            //我们这样做是为了确保并非集合中的所有服务器都同时拍摄快照
             int randRoll = r.nextInt(snapCount/2);
             while (true) {
                 Request si = null;
                 if (toFlush.isEmpty()) {
+                    //初始状态
                     si = queuedRequests.take();
                 } else {
                     si = queuedRequests.poll();
@@ -125,23 +135,46 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
                     }
                 }
                 if (si == requestOfDeath) {
+                    //毒丸
                     break;
                 }
                 if (si != null) {
                     // track the number of records written to the log
+                    //将请求封装为事务格式写入磁盘事务日志，返回写入是否成功
+                    //TODO 没有体现出来追加写的感觉？？
                     if (zks.getZKDatabase().append(si)) {
+                        //写日志计数+1
                         logCount++;
+
+                        //算下这个值 上面定义 randRoll = r.nextInt(snapCount/2);
+                        //假设snapCount=50，randRoll=r.nextInt(25)，即0-24，假如randRoll=13
+                        //logCount > (50/2 + 13) 即 logCount > 38，此时会拍摄快照。
+                        //再算个极值 randRoll=snapCount/2  那么logCount > (snapCount/2 + snapCount/2)
+                        //可以这么理解 如果没有这个随机数逻辑的话，那就是在 logCount>snapCount时拍摄快照，对于zk集群，因为强一致性，
+                        //所有服务器几乎都是在同时达到这个条件，也就是同时触发拍摄快照，同时较长时间的磁盘io，
+                        //这样一定会影响zk集群的整体性能，而且也不需要拍这么多快照。
+                        //所以每个服务器计算一个随机值，大于这个值就拍快照，避免了所有服务器都同时拍摄快照
                         if (logCount > (snapCount / 2 + randRoll)) {
+                            //达到拍快照条件
                             randRoll = r.nextInt(snapCount/2);
                             // roll the log
+                            //滚动日志 没理解术语含义，看实现是如果流不为空，flush缓存数据到磁盘，然后将流对象置为null。
+                            //理解：拍快照是对内存树拍快照，一定要在一个数据稳定的状态来拍，
+                            //拍快照取的点是lastZxid，在拍之前，这个zxid的持久化数据一定要达到最终状态，持久化完成，并且不可再写数据。
+                            //我们不可能在一个数据处于不稳定的时候来拍快照。
+                            //所以rollLog()就是保证这一点，刷缓存，并将输出流置为Null，也就是流结束了，后面再记日志的时候会创建新的流对象。
+                            //到这里，新的数据还是只存在于事务日志中，内存中没有，所以对外不可见。
                             zks.getZKDatabase().rollLog();
                             // take a snapshot
                             if (snapInProcess != null && snapInProcess.isAlive()) {
+                                //已经有快照线程在运行了
                                 LOG.warn("Too busy to snap, skipping");
                             } else {
+                                //构造快照线程并启动线程
                                 snapInProcess = new ZooKeeperThread("Snapshot Thread") {
                                         public void run() {
                                             try {
+                                                //拍个快照
                                                 zks.takeSnapshot();
                                             } catch(Exception e) {
                                                 LOG.warn("Unexpected exception", e);
@@ -154,7 +187,7 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
                         }
                     } else if (toFlush.isEmpty()) {
                         // optimization for read heavy workloads
-                        // iff this is a read, and there are no pending
+                        // if this is a read, and there are no pending
                         // flushes (writes), then just pass this to the next
                         // processor
                         if (nextProcessor != null) {
@@ -221,6 +254,7 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
 
     public void processRequest(Request request) {
         // request.addRQRec(">sync");
+        //还是入队
         queuedRequests.add(request);
     }
 
