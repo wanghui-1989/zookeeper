@@ -105,6 +105,19 @@ import static org.apache.zookeeper.common.NetUtils.formatInetAddr;
  * </pre>
  *
  * The request for the current leader will consist solely of an xid: int xid;
+ *
+ * 此类管理仲裁协议。 该服务器可以处于三种状态：
+ * 1. Leader选举 -每个服务器将选举一个领导者（最初建议自己担任领导者）。
+ * 2. Follower -服务器将与领导者同步并复制所有事务。
+ * 3. Leader -服务器将处理请求并将其转发给Follower。大多数Follower必须先记录请求日志，然后才能接受该请求。
+ *
+ * 此类将设置一个数据报套接字，该套接字将始终以其当前Leader的视图作为响应。 响应将采取以下形式：
+ *     int xid;
+ *     long myid;
+ *     long leader_id;
+ *     long leader_zxid;
+ *
+ * 当前Leader的请求将仅包含一个xid：int xid;
  */
 public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider {
     private static final Logger LOG = LoggerFactory.getLogger(QuorumPeer.class);
@@ -411,7 +424,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
      * conditions change (e.g. which state to become after LOOKING).
      */
     public enum LearnerType {
-        //统一都叫Learner
+        //zk有两种角色，一是Leader，一是Learner。Follower和Observer都叫Learner
         //Follower有投票权
         PARTICIPANT,
         //观察者，无投票权

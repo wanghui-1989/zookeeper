@@ -112,6 +112,11 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
      *  firstProcessor(PrepRequestProcessor)
      *       ->  syncProcessor(SyncRequestProcessor)
      *            -> finalProcessor(FinalRequestProcessor)
+     *
+     * 这个处理器链，类似于责任链模式，但是严格讲不是web应用的那种过滤器链，过滤器链是单线程串行执行。
+     * 而zk的RequestProcessor实现类基本都会继承Thread，起独立线程执行。
+     * 整体看是每一个RequestProcessor都会只启动一个线程运行，整体组成一个向前驱动的链，
+     * 前一个处理器处理完请求后，大部分情况下会将请求放入下一个处理器的阻塞队列中，下一个处理器不断地从队列中拿数据处理。
      */
     protected RequestProcessor firstProcessor;
     protected volatile State state = State.INITIAL;
@@ -477,10 +482,19 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
 
     //
     /**
-     * 处理器顺序:
+     * 默认的处理器顺序:
      *  firstProcessor(PrepRequestProcessor)
      *       ->  syncProcessor(SyncRequestProcessor)
      *            -> finalProcessor(FinalRequestProcessor)
+     *
+     * 在子类中，各子类会根据本身角色来覆盖该实现，改变处理器链。
+     * LeaderZooKeeperServer中:
+     *  -> LeaderRequestProcessor
+     *     -> PrepRequestProcessor
+     *          -> ProposalRequestProcessor
+     *              -> CommitProcessor
+     *                  -> Leader.ToBeAppliedRequestProcessor
+     *                      -> FinalRequestProcessor
      */
     protected void setupRequestProcessors() {
         RequestProcessor finalProcessor = new FinalRequestProcessor(this);

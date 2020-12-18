@@ -31,6 +31,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Responsible for performing local session upgrade. Only request submitted
  * directly to the leader should go through this processor.
+ * 负责执行本地会话升级。 只有直接提交给领导者的请求才能通过此处理器。
  */
 public class LeaderRequestProcessor implements RequestProcessor {
     private static final Logger LOG = LoggerFactory

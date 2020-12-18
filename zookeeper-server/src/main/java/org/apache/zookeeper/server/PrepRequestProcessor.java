@@ -91,6 +91,12 @@ import java.util.concurrent.LinkedBlockingQueue;
  * 在ZooKeeperServer#setupRequestProcessors()中只会实例化一个实例对象，所以这个是单线程的。
  *
  * 可以叫做 请求预处理器，先对请求做一些处理，然后向下传。
+ *
+ * 主要逻辑为：
+ *  首先是单线程，不断从LinkedBlockingQueue中拿请求数据，根据request.type判断属于客户端的哪一种请求。
+ *  如果是新增节点、修改节点等写操作，会调用zks.getNextZxid()，拿到递增的zxid（事务id），
+ *  然后根据内存树DataTree的现有数据，来计算新的数据path名称，版本号，acl都应该是什么，封装数据，沿着处理器链向下传递。
+ *  注意这里的操作不会对内存树有影响，也就是操作结果不会在内存树生效。只是得到数据应该是什么样，比如创建的节点名称是什么等等。
  */
 public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
@@ -774,7 +780,6 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
      *
      * 判断request.type，属于客户端的哪一种请求。调用zks.getNextZxid()，拿到递增的zxid，然后处理请求。
      * 这里的操作不会对内存树有影响，也就是操作结果不会在内存树生效。只是得到数据应该是什么样，比如创建的节点名称是什么等等。
-     * 可以反向思考，现在还没有投票，如果生效了那客户端在这个节点中就可以看到数据了，而其他节点还没有，违反一致性。
      *
      * @param request
      */

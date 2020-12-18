@@ -79,6 +79,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 此类维护树数据结构。 它没有任何网络或客户端连接代码，因此可以以独立方式进行测试。
  * 该树维护两个并行的数据结构：从完整路径映射到DataNode的哈希表和DataNode的树。
  * 对路径的所有访问都是通过哈希表进行的。 仅在序列化到磁盘时遍历该树。
+ *
+ * 对内存树的操作都在这里，包括快照序列化，反序列化、添加节点、删除节点、修改节点、批量操作等。
+ *
  */
 public class DataTree {
     private static final Logger LOG = LoggerFactory.getLogger(DataTree.class);
@@ -143,6 +146,7 @@ public class DataTree {
 
     /**
      * This hashtable lists the paths of the ephemeral nodes of a session.
+     * session和对应的路径集合。存储某个session和它创建的路径，在session失效后，因为是临时节点，应该删除创建的所有节点。
      */
     private final Map<Long, HashSet<String>> ephemerals =
         new ConcurrentHashMap<Long, HashSet<String>>();
@@ -499,6 +503,7 @@ public class DataTree {
             } else if (ephemeralType == EphemeralType.TTL) {
                 ttls.add(path);
             } else if (ephemeralOwner != 0) {
+                //临时节点 获取该session对应的所有临时节点路径集合
                 HashSet<String> list = ephemerals.get(ephemeralOwner);
                 if (list == null) {
                     list = new HashSet<String>();
@@ -532,6 +537,7 @@ public class DataTree {
             updateCount(lastPrefix, 1);
             updateBytes(lastPrefix, data == null ? 0 : data.length);
         }
+        //触发事件通知
         dataWatches.triggerWatch(path, Event.EventType.NodeCreated);
         childWatches.triggerWatch(parentName.equals("") ? "/" : parentName,
                 Event.EventType.NodeChildrenChanged);
@@ -636,6 +642,7 @@ public class DataTree {
             throw new KeeperException.NoNodeException();
         }
         byte lastdata[] = null;
+        //使用要修改的节点作为锁
         synchronized (n) {
             lastdata = n.data;
             n.data = data;
@@ -813,6 +820,9 @@ public class DataTree {
         return this.processTxn(header, txn, false);
     }
 
+    /**
+     * 根据请求类型，对内存树执行创建节点、删除节点、修改节点、权限以及批量执行等操作，返回操作结果。
+     */
     public ProcessTxnResult processTxn(TxnHeader header, Record txn, boolean isSubTxn)
     {
         ProcessTxnResult rc = new ProcessTxnResult();
@@ -907,6 +917,7 @@ public class DataTree {
                     rc.path = checkTxn.getPath();
                     break;
                 case OpCode.multi:
+                    //批量操作
                     MultiTxn multiTxn = (MultiTxn) txn ;
                     List<Txn> txns = multiTxn.getTxns();
                     rc.multiResult = new ArrayList<ProcessTxnResult>();
@@ -988,7 +999,7 @@ public class DataTree {
         }
 
 
-        /*
+        /**
          * Things we can only update after the whole txn is applied to data
          * tree.
          *
@@ -1002,9 +1013,15 @@ public class DataTree {
          *
          * To avoid this, we only update the lastProcessedZxid when the whole
          * multi-op txn is applied to DataTree.
+         *
+         * 翻译：只有将整个txn应用于数据树之后，我们才能更新事务。
+         * 如果我们用multi中的第一个子txn更新了lastProcessedZxid，并且有一个正在进行的快照，
+         * 则与快照关联的zxid可能仅包括multi op的一部分。加载快照时，它将仅在与快照文件关联的zxid之后加载txns，
+         * 这可能会由于缺少子txns而导致数据不一致。为了避免这种情况，
+         * 我们仅在将整个多操作txn应用于DataTree时才更新lastProcessedZxid。
          */
         if (!isSubTxn) {
-            /*
+            /**
              * A snapshot might be in progress while we are modifying the data
              * tree. If we set lastProcessedZxid prior to making corresponding
              * change to the tree, then the zxid associated with the snapshot
@@ -1017,13 +1034,24 @@ public class DataTree {
              * lastProcessedZxid.  During restore, we correctly handle the
              * case where the snapshot contains data ahead of the zxid associated
              * with the file.
+             *
+             * 翻译：在我们修改数据树时，可能正在快照。如果在对树进行相应更改之前设置了lastProcessedZxid，
+             * 则与快照文件关联的zxid将位于其内容之前。因此，在从快照还原时，还原方法将不会将事务应用于与快照文件关联的zxid，
+             * 因为还原方法假定该事务存在于快照中。为了避免这种情况，我们首先应用事务，然后修改lastProcessedZxid。
+             * 在还原过程中，我们可以正确处理快照包含与文件关联的zxid之前的数据的情况。
+             *
+             * 个人理解：假如先将lastProcessedZxid修改为本次zxid，然后在继续执行本次事务之前，快照开始拍摄，
+             * 快照取的lastProcessedZxid为本次的zxid，快照序列化完成之后，本次事务才开始执行添加节点、修改节点操作，
+             * 这样在快照中就相当于没有将zxid和对应的事务序列化保存。在还原的时候，根据zxid进行还原，此时快照文件中没有本次事务，
+             * 后面会根据zxid比对，将大于zxid的事务日志应用到DataTree，小于zxid的事务日志不会处理，因为程序认为快照文件应该包含了本次的事务，
+             * 这样本次事务不会被还原，就丢失了。所以先添加到DataTree，然后再更新lastProcessedZxid。
              */
             if (rc.zxid > lastProcessedZxid) {
                 lastProcessedZxid = rc.zxid;
             }
         }
 
-        /*
+        /**
          * Snapshots are taken lazily. It can happen that the child
          * znodes of a parent are created after the parent
          * is serialized. Therefore, while replaying logs during restore, a
@@ -1212,7 +1240,7 @@ public class DataTree {
         //开始拍摄快照时，第一次传入的path为""
         //DataTree在构造的时候，空字符串和/都对应根节点
         String pathString = path.toString();
-        //第一次取出来的是根节点
+        //每次都是取要序列化的节点，第一次取出来的是根节点
         DataNode node = getNode(pathString);
         if (node == null) {
             return;
@@ -1220,6 +1248,11 @@ public class DataTree {
         String children[] = null;
         DataNode nodeCopy;
         //节点锁，使用要序列化的节点作为锁
+        //假如在快照线程对当前节点序列化的同时，有一个线程调用setData修改节点内容，怎么处理的？
+        //查看修改内存树的源码：org.apache.zookeeper.server.DataTree.setData
+        //setData方法里面也会先从ConcurrentHashMap中取这个节点对象，使用这个节点对象作为锁，
+        //锁定以后，再修改节点的内容。就是使用互斥锁来保证只有一个线程可以操作数据。
+        //这里在使用快照来恢复数据的时候就不知道怎么处理了，有新有旧
         synchronized (node) {
             StatPersisted statCopy = new StatPersisted();
             copyStatPersisted(node.stat, statCopy);

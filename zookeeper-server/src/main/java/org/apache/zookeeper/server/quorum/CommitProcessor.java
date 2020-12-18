@@ -64,6 +64,21 @@ import org.apache.zookeeper.server.ZooKeeperServerListener;
  *
  * The current implementation solves the third constraint by simply allowing no
  * read requests to be processed in parallel with write requests.
+ *
+ * 该RequestProcessor将传入的提交请求与本地提交的请求进行匹配。
+ * 诀窍是，本地提交的更改系统状态的请求将作为传入的提交请求返回，因此我们需要将它们匹配。
+ * CommitProcessor是多线程的。线程之间的通信是通过队列，原子和在处理器上同步的wait / notifyAll处理的。
+ * CommitProcessor充当网关，用于允许请求继续处理管道的其余部分。它将允许许多读取请求，
+ * 但只有一个写入请求可以同时进行，从而确保以事务ID顺序处理写入请求。
+ * -1个提交处理器主线程，该线程监视请求队列，并根据工作线程的sessionId将请求分配给工作线程，
+ *   以便始终将特定会话的读写请求分配给同一线程（因此保证按顺序运行）。
+ * -0-N个工作线程，对请求运行其余的请求处理器管道。如果配置了0个工作线程，
+ *   则主要提交处理器线程将直接运行管道。典型的（默认）线程计数是：在32核计算机上，1个提交处理器线程和32个工作线程。
+ * 多线程约束：
+ * -每个会话的请求必须按顺序处理。
+ * -写请求必须以zxid顺序处理
+ * -必须确保一个会话中的两次写入之间没有竞争条件，否则会触发另一会话中的读取请求设置监视
+ * 当前的实现通过简单地不允许任何读请求与写请求并行处理来解决第三种约束。
  */
 public class CommitProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {

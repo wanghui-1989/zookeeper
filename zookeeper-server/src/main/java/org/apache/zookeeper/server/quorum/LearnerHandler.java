@@ -57,6 +57,7 @@ import org.slf4j.LoggerFactory;
  * There will be an instance of this class created by the Leader for each
  * learner. All communication with a learner is handled by this
  * class.
+ * Leader将为每个learner创建一个此类的实例。 与learner的所有交流都由该类处理。
  */
 public class LearnerHandler extends ZooKeeperThread {
     private static final Logger LOG = LoggerFactory.getLogger(LearnerHandler.class);

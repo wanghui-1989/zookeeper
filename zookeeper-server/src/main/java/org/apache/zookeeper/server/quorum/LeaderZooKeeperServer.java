@@ -61,6 +61,17 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
         return self.leader;
     }
 
+    /**
+     * 在子类中，各子类会根据本身角色来覆盖该实现，改变处理器链。
+     * 在LeaderZooKeeperServer中:
+     *
+     *     LeaderRequestProcessor
+     *       -> PrepRequestProcessor
+     *          -> ProposalRequestProcessor
+     *              -> CommitProcessor
+     *                  -> Leader.ToBeAppliedRequestProcessor
+     *                      -> FinalRequestProcessor
+     */
     @Override
     protected void setupRequestProcessors() {
         RequestProcessor finalProcessor = new FinalRequestProcessor(this);

@@ -109,6 +109,7 @@ public class FinalRequestProcessor implements RequestProcessor {
         ProcessTxnResult rc = null;
         synchronized (zks.outstandingChanges) {
             // Need to process local session requests
+            //将请求应用于内存树DataTree，返回操作结果
             rc = zks.processTxn(request);
 
             // request.hdr is set for write requests, which are the only ones
@@ -480,6 +481,7 @@ public class FinalRequestProcessor implements RequestProcessor {
             err = Code.MARSHALLINGERROR;
         }
 
+        //创建响应
         long lastZxid = zks.getZKDatabase().getDataTreeLastProcessedZxid();
         ReplyHeader hdr =
             new ReplyHeader(request.cxid, lastZxid, err.intValue());
@@ -489,6 +491,7 @@ public class FinalRequestProcessor implements RequestProcessor {
                     request.createTime, Time.currentElapsedTime());
 
         try {
+            //发送响应
             cnxn.sendResponse(hdr, rsp, "response");
             if (request.type == OpCode.closeSession) {
                 cnxn.sendCloseSession();

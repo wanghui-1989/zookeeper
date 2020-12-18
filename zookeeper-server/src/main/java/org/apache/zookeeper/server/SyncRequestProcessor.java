@@ -61,6 +61,8 @@ import org.slf4j.LoggerFactory;
 public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(SyncRequestProcessor.class);
+    //ZooKeeperServer有多个子类
+    //QuorumZooKeeperServer：LeaderZooKeeperServer、FollowerZooKeeperServer、LearnerZooKeeperServer、ObserverZooKeeperServer
     private final ZooKeeperServer zks;
     private final LinkedBlockingQueue<Request> queuedRequests =
         new LinkedBlockingQueue<Request>();
@@ -141,6 +143,7 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
                 if (si != null) {
                     // track the number of records written to the log
                     //将请求封装为事务格式写入磁盘事务日志，返回写入是否成功
+                    //zks的多个子类，当前对象是leader、follower、observer的一种
                     //TODO 没有体现出来追加写的感觉？？
                     if (zks.getZKDatabase().append(si)) {
                         //写日志计数+1

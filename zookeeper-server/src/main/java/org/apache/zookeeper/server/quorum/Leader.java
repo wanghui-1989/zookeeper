@@ -368,7 +368,8 @@ public class Leader {
      * Similar to INFORM, only for a reconfig operation.
      */
     final static int INFORMANDACTIVATE = 19;
-    
+
+    //Proposal：提案，提议
     final ConcurrentMap<Long, Proposal> outstandingProposals = new ConcurrentHashMap<Long, Proposal>();
 
     private final ConcurrentLinkedQueue<Proposal> toBeApplied = new ConcurrentLinkedQueue<Proposal>();
@@ -1146,6 +1147,7 @@ public class Leader {
 
     /**
      * Sends a sync message to the appropriate server
+     * 发送同步消息到适当的服务器
      */
     public void sendSync(LearnerSyncRequest r){
         QuorumPacket qp = new QuorumPacket(Leader.SYNC, 0, null, null);
