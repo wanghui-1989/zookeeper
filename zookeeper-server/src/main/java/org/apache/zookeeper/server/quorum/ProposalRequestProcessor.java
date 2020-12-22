@@ -39,12 +39,16 @@ import org.slf4j.LoggerFactory;
  *   另一个是剩下的其他请求,主要是其他learner server端转过来的写请求，以及client的读请求。
  *
  * 1.先说如何处理Follower转发过来的"sync"同步请求：
- *   1.zk不能保证每个服务实例在每个时间都具有相同的ZooKeeper数据视图。由于诸如网络延迟之类的因素，
+ *   1.zk不能保证每个服务实例在每个时间都具有相同的ZooKeeper数据视图。由于网络延迟之类的因素，
  *     一个客户端可能会在另一客户端收到更改通知之前执行更新。考虑两个客户端A和B的情况，
  *     如果客户端A将znode/a的值从0设置为1，然后告诉客户端B读取/a，则客户端B可能读取旧值0，具体取决于连的哪个服务器。
  *     如果客户端A和客户端B读取相同的值很重要，则客户端B应该在执行读取之前从ZooKeeper API方法中调用sync()方法。
  *     sync是使得client当前连接着的ZooKeeper服务器，和ZooKeeper的Leader节点同步（sync）一下数据。
- *     用法一般是同一线程串行执行，先调 api.sync()，然后调用api.getData(path)。
+ *     用法一般是同一线程串行执行，先调 zookeeper.sync("关注的路径path","可阻塞的回调对象","回调上下文对象")，
+ *     调用完后，会再调用"可阻塞的回调对象.await等阻塞方法"，等待Leader和当前Follower数据同步完成，返回响应，
+ *     然后就可以调用zookeeper.getData("关注的路径path")了，可以保证在该路径的数据上，获取到和Leader一致的视图。
+ *     具体可以参考org.apache.zookeeper.cli.SyncCommand#exec()和org.apache.zookeeper.server.quorum
+ *     .EphemeralNodeDeletionTest#testEphemeralNodeDeletion()。
  *   2.当follower收到到客户端发来的sync请求时，会将这个请求添加到一个pendingSyncs队列里，然后将这个请求发送给leader，
  *     直到收到leader的Leader.SYNC响应消息时，才将这个请求从pendingSyncs队列里移除，并commit这个请求。
  *   3.当Leader收到一个sync请求时，如果leader当前没有待commit的决议，那么leader会立即发送一个Leader.SYNC消息给follower。
