@@ -122,6 +122,7 @@ public class WorkerService {
         int size = workers.size();
         if (size > 0) {
             try {
+                //对zxid取余，保证同一个zxid，分配到同一个线程，保证顺序执行。
                 // make sure to map negative ids as well to [0, size-1]
                 int workerNum = ((int) (id % size) + size) % size;
                 ExecutorService worker = workers.get(workerNum);

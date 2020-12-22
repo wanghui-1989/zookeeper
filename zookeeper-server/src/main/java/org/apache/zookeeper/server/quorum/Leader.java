@@ -57,6 +57,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * This class has the control logic for the Leader.
+ * Leader一定是单例的
  */
 public class Leader {
     private static final Logger LOG = LoggerFactory.getLogger(Leader.class);
@@ -283,6 +284,7 @@ public class Leader {
 
     /**
      * This tells the leader that the connecting peer is actually an observer
+     * 这告诉领导者，连接的服务实例实际上是观察者
      */
     final static int OBSERVERINFO = 16;
 
@@ -295,6 +297,7 @@ public class Leader {
     /**
      * This message type is sent by a follower to pass the last zxid. This is here
      * for backward compatibility purposes.
+     * follower发送此消息类型以传递最后的zxid。 这是为了向后兼容。
      */
     final static int FOLLOWERINFO = 11;
 
@@ -323,6 +326,7 @@ public class Leader {
 
     /**
      * This message type is sent by a leader to propose a mutation.
+     * 领导者发送此消息类型以提出提案。
      */
     public final static int PROPOSAL = 2;
 
@@ -369,9 +373,10 @@ public class Leader {
      */
     final static int INFORMANDACTIVATE = 19;
 
-    //Proposal：提案，提议
+    //将要发送出去的提案 key：zxid，value：提案
     final ConcurrentMap<Long, Proposal> outstandingProposals = new ConcurrentHashMap<Long, Proposal>();
 
+    //通过投票，将被应用的提案
     private final ConcurrentLinkedQueue<Proposal> toBeApplied = new ConcurrentLinkedQueue<Proposal>();
 
     // VisibleForTesting
@@ -401,6 +406,7 @@ public class Leader {
 
                         BufferedInputStream is = new BufferedInputStream(
                                 s.getInputStream());
+                        //为每个learner创建一个通信线程，专门负责与这个follower的所有通信
                         LearnerHandler fh = new LearnerHandler(s, is, Leader.this);
                         fh.start();
                     } catch (SocketException e) {
@@ -915,6 +921,7 @@ public class Leader {
     }
     
     static class ToBeAppliedRequestProcessor implements RequestProcessor {
+        //对leader来说，next为FinalRequestProcessor
         private final RequestProcessor next;
 
         private final Leader leader;
@@ -924,6 +931,9 @@ public class Leader {
          * this to work next must be a FinalRequestProcessor and
          * FinalRequestProcessor.processRequest MUST process the request
          * synchronously!
+         *
+         * 该请求处理器仅维护toBeApplied列表。
+         * 为此，接下来必须是FinalRequestProcessor和FinalRequestProcessor.processRequest必须同步处理请求！
          *
          * @param next
          *                a reference to the FinalRequestProcessor
@@ -987,6 +997,7 @@ public class Leader {
      */
     void sendPacket(QuorumPacket qp) {
         synchronized (forwardingFollowers) {
+            //遍历发给所有的follower
             for (LearnerHandler f : forwardingFollowers) {
                 f.queuePacket(qp);
             }
@@ -1055,6 +1066,7 @@ public class Leader {
         sendObserverPacket(qp);
     }
 
+    //最后表决的提案zxid
     long lastProposed;
 
 
@@ -1077,6 +1089,8 @@ public class Leader {
     /**
      * create a proposal and send it out to all the members
      *
+     * 创建一个提案，发送给所有成员
+     *
      * @param request
      * @return the proposal that is queued to send to all the members
      */
@@ -1092,8 +1106,10 @@ public class Leader {
             throw new XidRolloverException(msg);
         }
 
+        //序列化头和内容到byte[]
         byte[] data = SerializeUtils.serializeRequest(request);
         proposalStats.setLastBufferSize(data.length);
+        //发的提案、zxid，data
         QuorumPacket pp = new QuorumPacket(Leader.PROPOSAL, request.zxid, data, null);
 
         Proposal p = new Proposal();
@@ -1101,6 +1117,7 @@ public class Leader {
         p.request = request;                
         
         synchronized(this) {
+           //投票仲裁裁判
            p.addQuorumVerifier(self.getQuorumVerifier());
                    
            if (request.getHdr().getType() == OpCode.reconfig){
@@ -1115,8 +1132,12 @@ public class Leader {
                 LOG.debug("Proposing:: " + request);
             }
 
+            //更新最后投票的zxid
             lastProposed = p.packet.getZxid();
+            //暂存的是Proposal
             outstandingProposals.put(lastProposed, p);
+            //这里发出的是QuorumPacket
+            //遍历发给所有的follower
             sendPacket(pp);
         }
         return p;
@@ -1134,8 +1155,12 @@ public class Leader {
 
     synchronized public void processSync(LearnerSyncRequest r){
         if(outstandingProposals.isEmpty()){
+            //没有待处理的提议，其中的一层含义是所有提案已经由有效follower表决过，并提交，
+            //learder和Follower此时数据已是同步的，直接返回响应即可。
+            //入队、序列化、发送响应包。
             sendSync(r);
         } else {
+            //获取lastProposed(是个zxid)，对应的所有同步请求
             List<LearnerSyncRequest> l = pendingSyncs.get(lastProposed);
             if (l == null) {
                 l = new ArrayList<LearnerSyncRequest>();
@@ -1150,6 +1175,7 @@ public class Leader {
      * 发送同步消息到适当的服务器
      */
     public void sendSync(LearnerSyncRequest r){
+        //leader发给follower的响应
         QuorumPacket qp = new QuorumPacket(Leader.SYNC, 0, null, null);
         r.fh.queuePacket(qp);
     }
@@ -1215,6 +1241,7 @@ public class Leader {
             if (connectingFollowers.contains(self.getId()) &&
                                             verifier.containsQuorum(connectingFollowers)) {
                 waitingForNewEpoch = false;
+                //新的epoch
                 self.setAcceptedEpoch(epoch);
                 connectingFollowers.notifyAll();
             } else {

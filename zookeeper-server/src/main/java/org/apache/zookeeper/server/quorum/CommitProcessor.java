@@ -65,6 +65,8 @@ import org.apache.zookeeper.server.ZooKeeperServerListener;
  * The current implementation solves the third constraint by simply allowing no
  * read requests to be processed in parallel with write requests.
  *
+ * 内部引入线程池WorkerService workerPool。根据请求zxid取模找到对应的固定线程，执行请求，保证同一个zxid的请求被串行执行。
+ *
  * 该RequestProcessor将传入的提交请求与本地提交的请求进行匹配。
  * 诀窍是，本地提交的更改系统状态的请求将作为传入的提交请求返回，因此我们需要将它们匹配。
  * CommitProcessor是多线程的。线程之间的通信是通过队列，原子和在处理器上同步的wait / notifyAll处理的。
@@ -93,26 +95,32 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
 
     /**
      * Requests that we are holding until the commit comes in.
+     * 在提交之前，我们一直保留的请求。
      */
     protected final LinkedBlockingQueue<Request> queuedRequests =
         new LinkedBlockingQueue<Request>();
 
     /**
      * Requests that have been committed.
+     * 已提交的请求
      */
     protected final LinkedBlockingQueue<Request> committedRequests =
         new LinkedBlockingQueue<Request>();
 
-    /** Request for which we are currently awaiting a commit */
+    /**
+     * Request for which we are currently awaiting a commit
+     * 我们正在等待提交的请求
+     */
     protected final AtomicReference<Request> nextPending =
         new AtomicReference<Request>();
-    /** Request currently being committed (ie, sent off to next processor) */
+    /** 当前正在被提交的请求 Request currently being committed (ie, sent off to next processor) */
     private final AtomicReference<Request> currentlyCommitting =
         new AtomicReference<Request>();
 
     /** The number of requests currently being processed */
     protected AtomicInteger numRequestsProcessing = new AtomicInteger(0);
 
+    //对leader来说应该是Leader.ToBeAppliedRequestProcessor
     RequestProcessor nextProcessor;
 
     protected volatile boolean stopped = true;
@@ -186,13 +194,19 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
                  * Processing queuedRequests: Process the next requests until we
                  * find one for which we need to wait for a commit. We cannot
                  * process a read request while we are processing write request.
+                 * 处理queuedRequests：处理下一个请求，直到找到需要等待提交的请求为止。 我们在处理写请求时无法处理读请求。
                  */
                 while (!stopped && !isWaitingForCommit() &&
                        !isProcessingCommit() &&
                        (request = queuedRequests.poll()) != null) {
                     if (needCommit(request)) {
+                        //是创建、删除、修改等写请求，需要提交的请求
                         nextPending.set(request);
                     } else {
+                        //读数据等不需要提交的读请求
+                        //根据请求的zxid对ArrayList<ExecutorService>取模，拿到对应的固定线程执行器
+                        //执行请求，保证同一个zxid的请求是被同一个线程处理器处理，顺序执行，内部逻辑就是
+                        //拿到下一个processer，调用processer.processRequest
                         sendToNextProcessor(request);
                     }
                 }

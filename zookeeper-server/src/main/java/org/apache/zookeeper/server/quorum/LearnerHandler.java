@@ -58,10 +58,12 @@ import org.slf4j.LoggerFactory;
  * learner. All communication with a learner is handled by this
  * class.
  * Leader将为每个learner创建一个此类的实例。 与learner的所有交流都由该类处理。
+ * 每一个实例连接一个learner，与这个learner的所有通信由这个线程实例负责。
+ *
  */
 public class LearnerHandler extends ZooKeeperThread {
     private static final Logger LOG = LoggerFactory.getLogger(LearnerHandler.class);
-
+    //与follower的通信socket
     protected final Socket sock;
 
     public Socket getSocket() {
@@ -78,6 +80,7 @@ public class LearnerHandler extends ZooKeeperThread {
     
     /**
      * ZooKeeper server identifier of this learner
+     * learner服务器id，应该是为learner配置的myid字段
      */
     protected long sid = 0;
 
@@ -93,6 +96,7 @@ public class LearnerHandler extends ZooKeeperThread {
 
     /**
      * The packets to be sent to the learner
+     * 要发给learner的请求或者响应包，如：sync响应包，提案包。
      */
     final LinkedBlockingQueue<QuorumPacket> queuedPackets =
         new LinkedBlockingQueue<QuorumPacket>();
@@ -104,6 +108,9 @@ public class LearnerHandler extends ZooKeeperThread {
      * It keeps track of only one proposal at a time, when the ACK for
      * that proposal arrives, it switches to the last proposal received
      * or clears the value if there is no pending proposal.
+     *
+     * 此类控制领导者等待学习者对提案认可的时间。 如果时间超过syncLimit，则连接将关闭。
+     * 它一次仅跟踪一个提案，当该提案的ACK到达时，它将切换到收到的最后一个提案，如果没有待处理的提案，则清除该值。
      */
     private class SyncLimitCheck {
         private boolean started = false;
@@ -158,6 +165,7 @@ public class LearnerHandler extends ZooKeeperThread {
 
     private BinaryOutputArchive oa;
 
+    //socket输入流
     private final BufferedInputStream bufferedInput;
     private BufferedOutputStream bufferedOutput;
     
@@ -234,6 +242,7 @@ public class LearnerHandler extends ZooKeeperThread {
     /**
      * This method will use the thread to send packets added to the
      * queuedPackets list
+     * 序列化包，leader向连接的follower发送包
      *
      * @throws InterruptedException
      */
@@ -244,7 +253,9 @@ public class LearnerHandler extends ZooKeeperThread {
                 QuorumPacket p;
                 p = queuedPackets.poll();
                 if (p == null) {
+                    //待发送响应队列为空
                     bufferedOutput.flush();
+                    //改为阻塞等待
                     p = queuedPackets.take();
                 }
 
@@ -253,14 +264,17 @@ public class LearnerHandler extends ZooKeeperThread {
                     break;
                 }
                 if (p.getType() == Leader.PING) {
+                    //leader发给learner的ping请求
                     traceMask = ZooTrace.SERVER_PING_TRACE_MASK;
                 }
                 if (p.getType() == Leader.PROPOSAL) {
+                    //leader发出的提案，跟踪提案表决超时时间
                     syncLimitCheck.updateProposal(p.getZxid(), System.nanoTime());
                 }
                 if (LOG.isTraceEnabled()) {
                     ZooTrace.logQuorumPacket(LOG, traceMask, 'o', p);
                 }
+                //输出流，序列化
                 oa.writeRecord(p, "packet");
             } catch (IOException e) {
                 if (!sock.isClosed()) {
@@ -368,16 +382,21 @@ public class LearnerHandler extends ZooKeeperThread {
     @Override
     public void run() {
         try {
+            //将当前连接处理器注册到leader
             leader.addLearnerHandler(this);
             tickOfNextAckDeadline = leader.self.tick.get()
                     + leader.self.initLimit + leader.self.syncLimit;
 
+            //socket输入流
             ia = BinaryInputArchive.getArchive(bufferedInput);
+            //socket输出流
             bufferedOutput = new BufferedOutputStream(sock.getOutputStream());
             oa = BinaryOutputArchive.getArchive(bufferedOutput);
 
             QuorumPacket qp = new QuorumPacket();
+            //反序列化读取learner发来的数据
             ia.readRecord(qp, "packet");
+            //初次连接，learner发过来的应该是follower信息(我是follower并且最大的zxid是什么) 或者 observer信息(我是observer)
             if(qp.getType() != Leader.FOLLOWERINFO && qp.getType() != Leader.OBSERVERINFO){
                 LOG.error("First packet " + qp.toString()
                         + " is not FOLLOWERINFO or OBSERVERINFO!");
@@ -388,6 +407,7 @@ public class LearnerHandler extends ZooKeeperThread {
             if (learnerInfoData != null) {
                 ByteBuffer bbsid = ByteBuffer.wrap(learnerInfoData);
                 if (learnerInfoData.length >= 8) {
+                    //learner服务器的id，应该是配置的myid
                     this.sid = bbsid.getLong();
                 }
                 if (learnerInfoData.length >= 12) {
@@ -400,6 +420,9 @@ public class LearnerHandler extends ZooKeeperThread {
                     }
                 }
             } else {
+                //sid正常应该是正整数
+                //followerCounter默认-1，然后再减一，走到这的都是负数
+                //应该是表示有异常的learner吧
                 this.sid = leader.followerCounter.getAndDecrement();
             }
 
@@ -411,14 +434,17 @@ public class LearnerHandler extends ZooKeeperThread {
             }
                         
             if (qp.getType() == Leader.OBSERVERINFO) {
+                  //缺省类型是follower，而当前learner是obsever
                   learnerType = LearnerType.OBSERVER;
             }
 
+            //learner上的最新zxid，可以反映learner上的数据新旧程度
             long lastAcceptedEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
 
             long peerLastZxid;
             StateSummary ss = null;
             long zxid = qp.getZxid();
+            //获取或者计算新的epoch
             long newEpoch = leader.getEpochToPropose(this.getSid(), lastAcceptedEpoch);
             long newLeaderZxid = ZxidUtils.makeZxid(newEpoch, 0);
 

@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
  *
  * Proposal:提案
  *
+ * TODO 貌似只有Leader才有执行这个处理器？？？
+ *
  * 主要逻辑：
  *  前一个处理器PrepRequestProcessor已经将请求封装好了，到这里其实就是应该由leader发起提案了（对写操作来说）
  *  这个处理器将请求分成两种进行处理，
@@ -60,6 +62,7 @@ import org.slf4j.LoggerFactory;
  *
  *
  * 2.剩下的其他请求，主要是其他learner server端转过来的写请求，以及client的读请求。
+ *   1.交个下一个处理器执行，即CommitProcessor
  *
  *
  */
@@ -68,7 +71,7 @@ public class ProposalRequestProcessor implements RequestProcessor {
         LoggerFactory.getLogger(ProposalRequestProcessor.class);
 
     LeaderZooKeeperServer zks;
-
+    //对leader来说，nextProcessor为CommitProcessor
     RequestProcessor nextProcessor;
 
     //SyncRequestProcessor -> AckRequestProcessor
@@ -110,6 +113,8 @@ public class ProposalRequestProcessor implements RequestProcessor {
             //Follower转发过来的sync同步请求，处理逻辑见类头部注释
             zks.getLeader().processSync((LearnerSyncRequest)request);
         } else {
+            //剩下的请求，主要是其他learner server端转过来的写请求，以及client的读请求。
+            //交给下一个处理器执行，即CommitProcessor
             nextProcessor.processRequest(request);
             if (request.getHdr() != null) {
                 // We need to sync and get consensus on any transactions

@@ -79,6 +79,7 @@ public class FollowerRequestProcessor extends ZooKeeperCriticalThread implements
                 // add it to pendingSyncs.
                 switch (request.type) {
                 case OpCode.sync:
+                    //follower同步请求，入队，发给leader
                     zks.pendingSyncs.add(request);
                     zks.getFollower().request(request);
                     break;
