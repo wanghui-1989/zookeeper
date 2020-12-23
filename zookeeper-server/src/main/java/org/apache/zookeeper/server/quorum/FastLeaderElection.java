@@ -49,9 +49,13 @@ import org.slf4j.LoggerFactory;
  * There are a few parameters that can be tuned to change its behavior. First,
  * finalizeWait determines the amount of time to wait until deciding upon a leader.
  * This is part of the leader election algorithm.
+ *
+ * 其他选举算法都过期了，只剩这一个了。
+ * 使用TCP实现领导人选举。 它使用QuorumCnxManager类的对象来管理连接。
+ * 否则，与其他UDP实现一样，该算法基于推送。 有一些参数可以调整以更改其行为。
+ * 首先，finalizeWait确定在决定领导者之前要等待的时间。 这是领导者选举算法的一部分。
+ *
  */
-
-
 public class FastLeaderElection implements Election {
     private static final Logger LOG = LoggerFactory.getLogger(FastLeaderElection.class);
 

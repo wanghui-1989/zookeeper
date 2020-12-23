@@ -230,6 +230,7 @@ public class FileTxnSnapLog {
         FileTxnLog txnLog = new FileTxnLog(dataDir);
 
         RestoreFinalizer finalizer = () -> {
+            //从事务日志文件中还原内存树DataTree，返回最大的事务日志id。
             long highestZxid = fastForwardFromEdits(dt, sessions, listener);
             return highestZxid;
         };

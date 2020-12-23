@@ -826,11 +826,13 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             QV_LOCK.notifyAll();
         }
     }
-    
-    private int electionType;
 
+    //选举使用的算法是哪种
+    private int electionType;
+    //基本就是FastLeaderElection，其他算法都过期了
     Election electionAlg;
 
+    //缺省是使用jdk原生nio
     ServerCnxnFactory cnxnFactory;
     ServerCnxnFactory secureCnxnFactory;
 
@@ -838,7 +840,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
     private final QuorumStats quorumStats;
 
-    //web服务实例，默认用jetty
+    //web服务实例，默认用jetty，管理服务器的界面
     AdminServer adminServer;
 
     public static QuorumPeer testingQuorumPeer() throws SaslException {
@@ -918,8 +920,10 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         //zk服务端实例启动前工作
         //加载磁盘快照和提交日志，生成内存DataTree
         loadDataBase();
+        //初始化、启动socket服务，缺省使用jdk原生nio
         startServerCnxnFactory();
         try {
+            //启动jetty
             adminServer.start();
         } catch (AdminServerException e) {
             LOG.warn("Problem starting AdminServer", e);
@@ -994,6 +998,8 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     synchronized public void startLeaderElection() {
        try {
            if (getPeerState() == ServerState.LOOKING) {
+               //默认为ServerState.LOOKING
+               //创建投票 投给自己 myid，lastzxid，epoch
                currentVote = new Vote(myid, getLastLoggedZxid(), getCurrentEpoch());
            }
        } catch(IOException e) {
@@ -1114,12 +1120,15 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         //TODO: use a factory rather than a switch
         switch (electionAlgorithm) {
         case 0:
+            //过期了
             le = new LeaderElection(this);
             break;
         case 1:
+            //过期了
             le = new AuthFastLeaderElection(this);
             break;
         case 2:
+            //过期了
             le = new AuthFastLeaderElection(this, true);
             break;
         case 3:
@@ -1132,6 +1141,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             QuorumCnxManager.Listener listener = qcm.listener;
             if(listener != null){
                 listener.start();
+                //就剩这一个没过期的了
                 FastLeaderElection fle = new FastLeaderElection(this, qcm);
                 fle.start();
                 le = fle;

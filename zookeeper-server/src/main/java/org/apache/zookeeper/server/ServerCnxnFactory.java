@@ -127,6 +127,7 @@ public abstract class ServerCnxnFactory {
         String serverCnxnFactoryName =
             System.getProperty(ZOOKEEPER_SERVER_CNXN_FACTORY);
         if (serverCnxnFactoryName == null) {
+            //缺省是jdk nio
             serverCnxnFactoryName = NIOServerCnxnFactory.class.getName();
         }
         try {

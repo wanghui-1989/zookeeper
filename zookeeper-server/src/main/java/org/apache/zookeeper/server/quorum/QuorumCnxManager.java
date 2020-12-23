@@ -912,12 +912,14 @@ public class QuorumCnxManager {
                         LOG.info("Creating TLS-only quorum server socket");
                         ss = new UnifiedServerSocket(self.getX509Util(), false);
                     } else {
+                        //同步阻塞io
                         ss = new ServerSocket();
                     }
 
                     ss.setReuseAddress(true);
 
                     if (self.getQuorumListenOnAllIPs()) {
+                        //配置的选举端口
                         int port = self.getElectionAddress().getPort();
                         addr = new InetSocketAddress(port);
                     } else {
