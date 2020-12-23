@@ -169,7 +169,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
         public String hostname;
 
-        //默认Follower
+        //默认是Follower
         public LearnerType type = LearnerType.PARTICIPANT;
         
         private List<InetSocketAddress> myAddrs;
@@ -198,6 +198,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
          *
          * If the DNS lookup fails, this.addr and electionAddr remain
          * unmodified.
+         * 对服务器ip地址和选举ip地址执行DNS查找。 如果DNS查找失败，则this.addr和eletementAddr保持不变。
          */
         public void recreateSocketAddresses() {
             if (this.addr == null) {
@@ -266,12 +267,14 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
             // server_config should be either host:port:port or host:port:port:type
             try {
+                //host:port1:port2  port1为服务端口，除了选举以外使用
                 addr = new InetSocketAddress(serverParts[0],
                         Integer.parseInt(serverParts[1]));
             } catch (NumberFormatException e) {
                 throw new ConfigException("Address unresolved: " + serverParts[0] + ":" + serverParts[1]);
             }
             try {
+                ////host:port1:port2  port2为选举端口，选举使用
                 electionAddr = new InetSocketAddress(serverParts[0],
                         Integer.parseInt(serverParts[2]));
             } catch (NumberFormatException e) {
@@ -284,6 +287,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             }
 
             if (serverParts.length == 4) {
+                //host:port:port:type  这里是type
                 setType(serverParts[3]);
             }
 
@@ -411,6 +415,9 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     }
 
 
+    /**
+     * 服务器状态
+     */
     public enum ServerState {
         LOOKING, FOLLOWING, LEADING, OBSERVING;
     }
@@ -522,6 +529,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
     /**
      * This is who I think the leader currently is.
+     * 我认为leader目前就是这个人。
      */
     volatile private Vote currentVote;
 
@@ -830,6 +838,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
     private final QuorumStats quorumStats;
 
+    //web服务实例，默认用jetty
     AdminServer adminServer;
 
     public static QuorumPeer testingQuorumPeer() throws SaslException {
@@ -906,6 +915,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         if (!getView().containsKey(myid)) {
             throw new RuntimeException("My id " + myid + " not in the peer list");
         }
+        //zk服务端实例启动前工作
         //加载磁盘快照和提交日志，生成内存DataTree
         loadDataBase();
         startServerCnxnFactory();
@@ -915,6 +925,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             LOG.warn("Problem starting AdminServer", e);
             System.out.println(e);
         }
+        //开始leader选举
         startLeaderElection();
         super.start();
     }

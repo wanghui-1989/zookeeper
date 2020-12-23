@@ -65,6 +65,9 @@ public class FileSnap implements SnapShot {
 
     /**
      * deserialize a data tree from the most recent snapshot
+     * 两步
+     * 1.找最近的100个快照。
+     * 2.快照还原：从zxid最大的快照文件开始遍历，反序列化，然后检查，如果是有效的，就使用这个快照。返回快照的zxid。
      * @return the zxid of the snapshot
      */
     public long deserialize(DataTree dt, Map<Long, Integer> sessions)
@@ -72,6 +75,7 @@ public class FileSnap implements SnapShot {
         // we run through 100 snapshots (not all of them)
         // if we cannot get it running within 100 snapshots
         // we should  give up
+        //不是在所有快照中找，而是从最近100个快照中找，找不到就放弃。
         List<File> snapList = findNValidSnapshots(100);
         if (snapList.size() == 0) {
             return -1L;
@@ -97,8 +101,10 @@ public class FileSnap implements SnapShot {
             }
         }
         if (!foundValid) {
+            //未找到有效的快照
             throw new IOException("Not able to find valid snapshots in " + snapDir);
         }
+        //返回还原的快照zxid
         dt.lastProcessedZxid = Util.getZxidFromName(snap.getName(), SNAPSHOT_FILE_PREFIX);
         return dt.lastProcessedZxid;
     }
@@ -114,11 +120,13 @@ public class FileSnap implements SnapShot {
             InputArchive ia) throws IOException {
         FileHeader header = new FileHeader();
         header.deserialize(ia, "fileheader");
+        //校验文件头的魔数
         if (header.getMagic() != SNAP_MAGIC) {
             throw new IOException("mismatching magic headers "
                     + header.getMagic() +
                     " !=  " + FileSnap.SNAP_MAGIC);
         }
+        //反序列化快照到内存树DataTree
         SerializeUtils.deserializeSnapshot(dt,ia,sessions);
     }
 
@@ -144,6 +152,14 @@ public class FileSnap implements SnapShot {
      * @param n the number of most recent snapshots
      * @return the last n snapshots (the number might be
      * less than n in case enough snapshots are not available).
+     *
+     * 查找最后（也许）有效的n个快照。 这会对快照的有效性进行一些小的检查。 它仅在快照末尾检查/。
+     * 这并不意味着快照是真正有效的，而是很有可能有效的。 同样，最新的将排在第一位。
+     *
+     * 参数：
+     * n –最近快照的数量
+     * 返回值：
+     * 最后n个快照（如果没有足够的快照，则数目可以小于n）。
      * @throws IOException
      */
     private List<File> findNValidSnapshots(int n) throws IOException {

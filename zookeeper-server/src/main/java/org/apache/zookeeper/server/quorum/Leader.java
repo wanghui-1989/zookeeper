@@ -1226,29 +1226,47 @@ public class Leader {
     }
     // VisibleForTesting
     protected final Set<Long> connectingFollowers = new HashSet<Long>();
+
+    /**
+     * 这里是epoch的确定逻辑
+     * 在集群启动时第一次连接leader的时候，每个learner会发送自己的server id和最新的zxid。
+     * leader收到一个learner的zxid就提取一次epoch，调一次投票仲裁，如果learner的纪元>=当前leader的纪元，
+     * 那么将learner的纪元+1作为新纪元。
+     * 直到返回纪元的follower数量>半数，就停止投票，使用这个纪元作为新集群的纪元。半数以外的其他follower返回数据就不管了。
+     *
+     * @param sid learner服务器id
+     * @param lastAcceptedEpoch learner最新的纪元epoch
+     * @return 确定的新纪元epoch
+     */
     public long getEpochToPropose(long sid, long lastAcceptedEpoch) throws InterruptedException, IOException {
+        //connectingFollowers 连接的followers
         synchronized(connectingFollowers) {
             if (!waitingForNewEpoch) {
                 return epoch;
             }
             if (lastAcceptedEpoch >= epoch) {
+                //某一个follower的epoch >= 当前的epoch
+                //epoch+1
                 epoch = lastAcceptedEpoch+1;
             }
             if (isParticipant(sid)) {
+                //是有投票权的follower
                 connectingFollowers.add(sid);
             }
             QuorumVerifier verifier = self.getQuorumVerifier();
             if (connectingFollowers.contains(self.getId()) &&
                                             verifier.containsQuorum(connectingFollowers)) {
                 waitingForNewEpoch = false;
-                //新的epoch
+                //使用这个epoch作为新的epoch
                 self.setAcceptedEpoch(epoch);
                 connectingFollowers.notifyAll();
             } else {
+                //未达到半数
                 long start = Time.currentElapsedTime();
                 long cur = start;
                 long end = start + self.getInitLimit()*self.getTickTime();
                 while(waitingForNewEpoch && cur < end) {
+                    //阻塞知道投票超时结束
                     connectingFollowers.wait(end - cur);
                     cur = Time.currentElapsedTime();
                 }
@@ -1256,15 +1274,20 @@ public class Leader {
                     throw new InterruptedException("Timeout while waiting for epoch from quorum");
                 }
             }
+            //返回投票最终决定使用的epoch
             return epoch;
         }
     }
 
+    //已投票、表示赞同的follower
     // VisibleForTesting
     protected final Set<Long> electingFollowers = new HashSet<Long>();
     // VisibleForTesting
     protected boolean electionFinished = false;
+
+    //id为follower server id, ss为纪元响应
     public void waitForEpochAck(long id, StateSummary ss) throws IOException, InterruptedException {
+        //对epoch纪元进行投票
         synchronized(electingFollowers) {
             if (electionFinished) {
                 return;
@@ -1278,18 +1301,23 @@ public class Leader {
                                                     + " (last zxid)");
                 }
                 if (isParticipant(id)) {
+                    //服务器id在仲裁裁判的可投票成员里
                     electingFollowers.add(id);
                 }
             }
+            //投票仲裁裁判
             QuorumVerifier verifier = self.getQuorumVerifier();
             if (electingFollowers.contains(self.getId()) && verifier.containsQuorum(electingFollowers)) {
+                //大于半数 选举结束，纪元被统一
                 electionFinished = true;
                 electingFollowers.notifyAll();
             } else {
+                //未达到半数
                 long start = Time.currentElapsedTime();
                 long cur = start;
                 long end = start + self.getInitLimit()*self.getTickTime();
                 while(!electionFinished && cur < end) {
+                    //阻塞等待投票超时结束
                     electingFollowers.wait(end - cur);
                     cur = Time.currentElapsedTime();
                 }

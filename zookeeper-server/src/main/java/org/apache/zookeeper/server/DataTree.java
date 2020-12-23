@@ -82,6 +82,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * 对内存树的操作都在这里，包括快照序列化，反序列化、添加节点、删除节点、修改节点、批量操作等。
  *
+ *
+ * DataTree的序列化和还原过程：
+ * 分两部分完成：1.事务日志 2.快照
+ *
+ *
  */
 public class DataTree {
     private static final Logger LOG = LoggerFactory.getLogger(DataTree.class);
@@ -141,6 +146,7 @@ public class DataTree {
 
     /**
      * the path trie that keeps track fo the quota nodes in this datatree
+     * 路径前缀树(字典树)
      */
     private final PathTrie pTrie = new PathTrie();
 
@@ -1064,6 +1070,15 @@ public class DataTree {
          *
          * Note, such failures on DT should be seen only during
          * restore.
+         *
+         * 在快照树的基础上，还原事务日志，假如快照zxid=5，在拍快照的时候，并发修改了树，假设这个操作为创建节点/a/b，zxid=6。
+         * 在快照线程执行/a节点序列化之前，创建节点线程先操作完了，此时快照里就会包括了新的节点/a/b。
+         *
+         * 在还原快照文件后，DataTree上已经有了/a/b节点，此时执行zxid=6的事务日志，再次创建/a/b节点，
+         * 会抛出KeeperException.NodeExistsException，上面捕获后，将rc.err = exception.code().intValue();
+         * 到这里要判断是否是这个节点已存在异常，如果是的话修改下节点的指标值，同时也避免这个异常向上抛出影响了树的还原，
+         * 因为这个不是什么问题。
+         *
          */
         if (header.getType() == OpCode.create &&
                 rc.err == Code.NODEEXISTS.intValue()) {
@@ -1298,6 +1313,7 @@ public class DataTree {
     }
 
     public void deserialize(InputArchive ia, String tag) throws IOException {
+        //反序列化acl
         aclCache.deserialize(ia);
         nodes.clear();
         pTrie.clear();
@@ -1319,6 +1335,7 @@ public class DataTree {
                     throw new IOException("Invalid Datatree, unable to find " +
                             "parent " + parentPath + " of path " + path);
                 }
+                //添加子节点路径名称
                 parent.addChild(path.substring(lastSlash + 1));
                 long eowner = node.stat.getEphemeralOwner();
                 EphemeralType ephemeralType = EphemeralType.get(eowner);

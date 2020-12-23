@@ -213,6 +213,9 @@ public class FileTxnSnapLog {
      * this function restores the server
      * database after reading from the
      * snapshots and transaction logs
+     *
+     * 读取快照和事务日志，还原服务器内存DataTree
+     *
      * @param dt the datatree to be restored
      * @param sessions the sessions to be restored
      * @param listener the playback listener to run on the
@@ -222,6 +225,7 @@ public class FileTxnSnapLog {
      */
     public long restore(DataTree dt, Map<Long, Integer> sessions,
                         PlayBackListener listener) throws IOException {
+        //完成反序列化快照文件到DateTree，返回使用的快照zxid
         long deserializeResult = snapLog.deserialize(dt, sessions);
         FileTxnLog txnLog = new FileTxnLog(dataDir);
 
@@ -230,6 +234,7 @@ public class FileTxnSnapLog {
             return highestZxid;
         };
 
+        //没有找到有效的快照文件
         if (-1L == deserializeResult) {
             /* this means that we couldn't find any snapshot, so we need to
              * initialize an empty database (reported in ZOOKEEPER-2325) */
@@ -257,6 +262,9 @@ public class FileTxnSnapLog {
      * This function will fast forward the server database to have the latest
      * transactions in it.  This is the same as restore, but only reads from
      * the transaction logs and not restores from a snapshot.
+     *
+     * 从事务日志文件中还原内存树DataTree，返回最大的事务日志id。
+     *
      * @param dt the datatree to write transactions to.
      * @param sessions the sessions to be restored.
      * @param listener the playback listener to run on the
@@ -266,6 +274,12 @@ public class FileTxnSnapLog {
      */
     public long fastForwardFromEdits(DataTree dt, Map<Long, Integer> sessions,
                                      PlayBackListener listener) throws IOException {
+        //在快照最大zxid基础上+1 作为需要读取的事务日志文件zxid
+        //快照还原有一个隐含的情况，因为在拍摄快照的时候，允许并发修改DataTree，所以在拍快照的时候，数据可能被改了。
+        //读zk的代码看到zk保证了，如果拍摄时取的zxid=5，那么这个快照文件（如果完整有效的话），
+        //一定是把zxid=5以及之前的事务数据都序列化在快照文件里了，一定不会漏掉之前zxid的数据，可能会把zxid>5的数据也序列化到快照里。
+        //所以在已还原的快照基础上，只需要去还原zxid>5，即zxid+1=6以上的事务日志就可以了。
+        //这里返回的是zxid=6及以上的所有事务日志迭代器
         TxnIterator itr = txnLog.read(dt.lastProcessedZxid+1);
         long highestZxid = dt.lastProcessedZxid;
         TxnHeader hdr;

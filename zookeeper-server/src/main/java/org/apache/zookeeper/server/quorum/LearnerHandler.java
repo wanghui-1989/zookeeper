@@ -411,6 +411,7 @@ public class LearnerHandler extends ZooKeeperThread {
                     this.sid = bbsid.getLong();
                 }
                 if (learnerInfoData.length >= 12) {
+                    //协议版本号
                     this.version = bbsid.getInt(); // protocolVersion
                 }
                 if (learnerInfoData.length >= 20) {
@@ -444,11 +445,13 @@ public class LearnerHandler extends ZooKeeperThread {
             long peerLastZxid;
             StateSummary ss = null;
             long zxid = qp.getZxid();
-            //获取或者计算新的epoch
+            //获取或者投票计算新的epoch
             long newEpoch = leader.getEpochToPropose(this.getSid(), lastAcceptedEpoch);
+            //到这就是已经投票确定了最新的epoch了
             long newLeaderZxid = ZxidUtils.makeZxid(newEpoch, 0);
 
             if (this.getVersion() < 0x10000) {
+                //兼容低版本
                 // we are going to have to extrapolate the epoch information
                 long epoch = ZxidUtils.getEpochFromZxid(zxid);
                 ss = new StateSummary(epoch, zxid);
@@ -457,18 +460,27 @@ public class LearnerHandler extends ZooKeeperThread {
             } else {
                 byte ver[] = new byte[4];
                 ByteBuffer.wrap(ver).putInt(0x10000);
+                //上面收到learner的基础信息包，计算出最新的epoch后，这里把epoche，zxid，version等发给learner
+                //这个是learner收到的第一个包。
                 QuorumPacket newEpochPacket = new QuorumPacket(Leader.LEADERINFO, newLeaderZxid, ver, null);
                 oa.writeRecord(newEpochPacket, "packet");
                 bufferedOutput.flush();
+
+                //这里是上面leader发给learner纪元等数据后，learner返回的确认响应
+                //从这看这里持有的是长连接，否则socket应该变更为新的socket，TODO 查一下socket实现类和流逻辑。
                 QuorumPacket ackEpochPacket = new QuorumPacket();
+                //TODO 输入流可以再次读取，这里看下socket
                 ia.readRecord(ackEpochPacket, "packet");
                 if (ackEpochPacket.getType() != Leader.ACKEPOCH) {
                     LOG.error(ackEpochPacket.toString()
                             + " is not ACKEPOCH");
                     return;
 				}
+                //读取learner对协议版本号、zxid、epoch等初始化请求的响应
                 ByteBuffer bbepoch = ByteBuffer.wrap(ackEpochPacket.getData());
+                //使用learner发来的响应epoch，zxid
                 ss = new StateSummary(bbepoch.getInt(), ackEpochPacket.getZxid());
+                //
                 leader.waitForEpochAck(this.getSid(), ss);
             }
             peerLastZxid = ss.getLastZxid();
