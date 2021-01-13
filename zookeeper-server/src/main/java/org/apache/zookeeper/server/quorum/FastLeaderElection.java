@@ -546,6 +546,7 @@ public class FastLeaderElection implements Election {
 
     QuorumPeer self;
     Messenger messenger;
+    //逻辑时钟，表示当前是第几轮选举
     AtomicLong logicalclock = new AtomicLong(); /* Election instance */
     long proposedLeader;
     long proposedZxid;
@@ -676,6 +677,7 @@ public class FastLeaderElection implements Election {
 
     /**
      * Send notifications to all peers upon a change in our vote
+     * 在我们的投票发生变化时向所有服务器发送通知
      */
     private void sendNotifications() {
         for (long sid : self.getCurrentAndNextConfigVoters()) {
@@ -879,6 +881,8 @@ public class FastLeaderElection implements Election {
      * Starts a new round of leader election. Whenever our QuorumPeer
      * changes its state to LOOKING, this method is invoked, and it
      * sends notifications to all other peers.
+     * 开始新一轮的领导人选举。 每当我们的QuorumPeer将其状态更改为LOOKING时，
+     * 就会调用此方法，并将通知发送给所有其他对等方
      */
     public Vote lookForLeader() throws InterruptedException {
         try {
@@ -893,8 +897,9 @@ public class FastLeaderElection implements Election {
            self.start_fle = Time.currentElapsedTime();
         }
         try {
+            //收到的其他服务器的id和投票
             HashMap<Long, Vote> recvset = new HashMap<Long, Vote>();
-
+            //将自己的投票发给了哪些服务器
             HashMap<Long, Vote> outofelection = new HashMap<Long, Vote>();
 
             int notTimeout = finalizeWait;
@@ -910,6 +915,8 @@ public class FastLeaderElection implements Election {
 
             /*
              * Loop in which we exchange notifications until we find a leader
+             *
+             * 循环交换通知，直到找到leader
              */
 
             while ((self.getPeerState() == ServerState.LOOKING) &&

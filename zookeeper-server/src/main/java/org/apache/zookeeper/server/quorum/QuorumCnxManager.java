@@ -80,6 +80,28 @@ import org.slf4j.LoggerFactory;
  * Although this is not a problem for the leader election, it could be a problem
  * when consolidating peer communication. This is to be verified, though.
  *
+ * 此类为使用TCP的领导者选举实现了一个连接管理器。它为每两个服务器维护一个连接。
+ * 棘手的部分是要确保每两个运行正确并且可以通过网络进行通信的服务器之间都只能有一个连接。
+ * 如果两个服务器尝试同时启动连接，则连接管理器将使用一种非常简单的打破平局机制，根据双方的IP地址来决定删除哪个连接。
+ * 对于每个服务器，管理器都会维护要发送的消息队列。如果与任何特定服务器的连接断开，则发送方线程会将消息放回列表中。
+ * 由于当前使用队列来维护要发送到另一个服务器的消息，因此我们将消息添加到队列的尾部，从而更改消息的顺序。
+ * 尽管这对于领导者选举来说不是问题，但在巩固对等沟通时可能是一个问题。不过，这有待验证。
+ *
+ * 类似有向图结构
+ *
+ * 如何维持每两个服务器之间维护一个连接：
+ *  1. 明确方向，比较server id
+ *  2. 只能大的server id实例主动去连接小的server id实例。不能反向，即小的不能主动连接大的。
+ *  QuorumConnectionReqThread线程负责初始化连接，实现上面说的这些：
+ *    0. 每个服务器启动的时候，都会主动的去连接其他的所有服务器，只有被连接的服务器才会对socket做判断：
+ *    1. 当前服务器的QuorumCnxManager对象会为每一个要连接的服务器启动一个线程，判断与对应服务器的连接是否有效。
+ *    2. 假设当前服务器被其他服务器连接，会执行while循环, socket=serverSocket.accept()
+ *    ，然后将socket传给一个独立的QuorumConnectionReqThread线程处理。
+ *    3. 会从socket中读取到serverid，开始判断，假如当前服务器serverid=6, 主动连我的服务器id为5，因为当前serverid=6 > 主动连我服务器id=5，
+ *       小的不能主动连接大的，所以不允许这个连接存在，会关闭连接。
+ *    4. 假如当前服务器serverid=5, 主动连我的服务器id为6，因为大的可以连接小的，允许这个连接存在，缓存到map中。
+ *    5. 这就保证了两个服务器之间只能有一个连接存在。
+ *
  */
 
 public class QuorumCnxManager {
@@ -140,11 +162,13 @@ public class QuorumCnxManager {
      * Mapping from Peer to Thread number
      */
     final ConcurrentHashMap<Long, SendWorker> senderWorkerMap;
+    //key：serverid  value：队列。 需要发给对应serverid的数据
     final ConcurrentHashMap<Long, ArrayBlockingQueue<ByteBuffer>> queueSendMap;
     final ConcurrentHashMap<Long, ByteBuffer> lastMessageSent;
 
     /*
      * Reception queue
+     * 阻塞队列，接收其他服务端发来的消息
      */
     public final ArrayBlockingQueue<Message> recvQueue;
     /*
@@ -353,6 +377,7 @@ public class QuorumCnxManager {
      * Then we perform the initiation protocol.
      *  If this server has initiated the connection, then it gives up on the
      * connection if it loses challenge. Otherwise, it keeps the connection.
+     * BIO, 同步阻塞io。
      */
     public void initiateConnection(final InetSocketAddress electionAddr, final Long sid) {
 
@@ -476,6 +501,7 @@ public class QuorumCnxManager {
             authLearner.authenticate(sock, qps.hostname);
         }
 
+        //大的serverid 连 小的serverid 小的不能连接大的，保证两个服务器之间只有一个连接
         // If lost the challenge, then drop the new connection
         if (sid > self.getId()) {
             LOG.info("Have smaller server identifier, so dropping the connection: (myId:{} --> sid:{})", self.getId(), sid);
@@ -712,6 +738,7 @@ public class QuorumCnxManager {
             boolean knownId = false;
             // Resolve hostname for the remote server before attempting to
             // connect in case the underlying ip address has changed.
+            //更新下ip和端口，预防之前有过改动
             self.recreateSocketAddresses(sid);
             Map<Long, QuorumPeer.QuorumServer> lastCommittedView = self.getView();
             QuorumVerifier lastSeenQV = self.getLastSeenQuorumVerifier();

@@ -1186,6 +1186,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
         return null;
     }
 
+    //LE：LeaderElection缩写
     boolean shuttingDownLE = false;
     
     @Override
@@ -1279,9 +1280,10 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                         try {
                            reconfigFlagClear();
                             if (shuttingDownLE) {
+                               // 关闭leader选举
                                shuttingDownLE = false;
                                startLeaderElection();
-                               }
+                            }
                             setCurrentVote(makeLEStrategy().lookForLeader());
                         } catch (Exception e) {
                             LOG.warn("Unexpected exception", e);
