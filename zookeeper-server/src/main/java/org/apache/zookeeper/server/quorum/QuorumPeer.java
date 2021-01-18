@@ -156,12 +156,14 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
     }
 
     public static class QuorumServer {
-        //集群同步通信地址
+        //server.1=127.0.0.1:2888:3888
+        //集群同步通信地址，集群内部通讯地址，即上面的2888端口
         public InetSocketAddress addr = null;
 
-        //选举地址
+        //选举地址，即上面的3888端口
         public InetSocketAddress electionAddr = null;
 
+        //配置：clientPort=2181
         //客户端连接地址
         public InetSocketAddress clientAddr = null;
         
@@ -545,6 +547,8 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
     /**
      * The number of milliseconds of each tick
+     * tick翻译成中文的话就是滴答滴答的意思，连起来就是滴答滴答的时间，寓意心跳间隔，
+     * 单位是毫秒，系统默认是2000毫秒，也就是间隔两秒心跳一次。
      */
     protected int tickTime;
 
@@ -574,12 +578,14 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
 
     /**
      * The number of ticks that the initial synchronization phase can take
+     * 集群中的follower服务器(F)与leader服务器(L)之间初始连接时能容忍的最多心跳数（tickTime的数量）。
      */
     protected int initLimit;
 
     /**
      * The number of ticks that can pass between sending a request and getting
      * an acknowledgment
+     * 集群中flower服务器（F）跟leader（L）服务器之间的请求和答应最多能容忍的心跳数。
      */
     protected int syncLimit;
     
@@ -1132,12 +1138,21 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             le = new AuthFastLeaderElection(this, true);
             break;
         case 3:
+            //创建一个新的仲裁连接管理器 用于选举使用
+            //既然触发了重新选举leader，说明原leader不可用了，因为zk是保证CP的，
+            // 为了保证数据一致性，牺牲了可用性，目前集群会暂停对外服务。这里就可以体现，选举的时候关闭清空了原来的集群内服务器的连接。
+            //重新创建一个qcm，还有另外一个原因，因为有不可用的服务器，我们应该将当前服务和不可用服务器之间的连接断掉，
+            //这里没有只是移除这一个连接，而是采用重新创建连接的方式，这样服务器不可用也就不能创建有效的连接，达到了一样的结果。
             QuorumCnxManager qcm = createCnxnManager();
+            //用新的qcm替换旧的qcm
             QuorumCnxManager oldQcm = qcmRef.getAndSet(qcm);
             if (oldQcm != null) {
+                //如果旧的连接管理器不为null，说明重启了leader选举
                 LOG.warn("Clobbering already-set QuorumCnxManager (restarting leader election?)");
                 oldQcm.halt();
             }
+            //选举端口的监听器线程，监听选举端口的连接请求，
+            // 创建与其他服务器之间的连接，选举通信使用。这样新的QuorumCnxManager维持的连接就是用来选举使用。
             QuorumCnxManager.Listener listener = qcm.listener;
             if(listener != null){
                 listener.start();
@@ -1229,6 +1244,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
             while (running) {
                 switch (getPeerState()) {
                 case LOOKING:
+                    //选主
                     LOG.info("LOOKING");
 
                     if (Boolean.getBoolean("readonlymode.enabled")) {
@@ -1266,6 +1282,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                                 shuttingDownLE = false;
                                 startLeaderElection();
                             }
+                            //设置当前服务器的投票，将自己的投票发给其他的服务器，开始选主
                             setCurrentVote(makeLEStrategy().lookForLeader());
                         } catch (Exception e) {
                             LOG.warn("Unexpected exception", e);
@@ -1284,6 +1301,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                                shuttingDownLE = false;
                                startLeaderElection();
                             }
+                            //设置当前服务器的投票，将自己的投票发给其他的服务器，开始选主
                             setCurrentVote(makeLEStrategy().lookForLeader());
                         } catch (Exception e) {
                             LOG.warn("Unexpected exception", e);

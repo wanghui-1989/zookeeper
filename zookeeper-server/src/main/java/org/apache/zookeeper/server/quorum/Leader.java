@@ -269,16 +269,19 @@ public class Leader {
 
     /**
      * This message is for follower to expect diff
+     * 此消息供follower预期差异
      */
     final static int DIFF = 13;
 
     /**
      * This is for follower to truncate its logs
+     * 这是为了让follower删除它的日志
      */
     final static int TRUNC = 14;
 
     /**
      * This is for follower to download the snapshots
+     * 这是供follower下载快照的
      */
     final static int SNAP = 15;
 
@@ -466,6 +469,7 @@ public class Leader {
      */
     void lead() throws IOException, InterruptedException {
         self.end_fle = Time.currentElapsedTime();
+        //fast leader election选主耗费的时长 ms
         long electionTimeTaken = self.end_fle - self.start_fle;
         self.setElectionTimeTaken(electionTimeTaken);
         LOG.info("LEADING - LEADER ELECTION TOOK - {} {}", electionTimeTaken,
@@ -483,6 +487,7 @@ public class Leader {
 
             // Start thread that waits for connection requests from
             // new followers.
+            //learner与leader数据同步线程
             cnxAcceptor = new LearnerCnxAcceptor();
             cnxAcceptor.start();
 
@@ -1256,6 +1261,7 @@ public class Leader {
             QuorumVerifier verifier = self.getQuorumVerifier();
             if (connectingFollowers.contains(self.getId()) &&
                                             verifier.containsQuorum(connectingFollowers)) {
+                //投票达到半数，投票结束
                 waitingForNewEpoch = false;
                 //使用这个epoch作为新的epoch
                 self.setAcceptedEpoch(epoch);

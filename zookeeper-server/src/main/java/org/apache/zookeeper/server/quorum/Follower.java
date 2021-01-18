@@ -59,7 +59,7 @@ public class Follower extends Learner{
 
     /**
      * the main method called by the follower to follow the leader
-     *
+     * 这里是确定当前服务器角色为Follower后，执行的初始化以及后续follower逻辑。
      * @throws InterruptedException
      */
     void followLeader() throws InterruptedException {
@@ -72,9 +72,13 @@ public class Follower extends Learner{
         self.end_fle = 0;
         fzk.registerJMX(new FollowerBean(this, zk), self.jmxLocalPeerBean);
         try {
-            QuorumServer leaderServer = findLeader();            
+            //根据自己的投票，和集群服务器信息，找到leader，并重新解析最新的leader ip
+            QuorumServer leaderServer = findLeader();
             try {
+                //确定角色后，第一次连接leader，用的是集群内部通讯地址和端口，即下面配置中的2888端口
+                //server.1=127.0.0.1:2888:3888
                 connectToLeader(leaderServer.addr, leaderServer.hostname);
+                //和leader建立连接后发出的第一个包，就是将当前learner的基本信息发给leader，即向leader注册当前服务器
                 long newEpochZxid = registerWithLeader(Leader.FOLLOWERINFO);
                 if (self.isReconfigStateChange())
                    throw new Exception("learned about role change");

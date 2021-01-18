@@ -63,7 +63,7 @@ import org.slf4j.LoggerFactory;
  */
 public class LearnerHandler extends ZooKeeperThread {
     private static final Logger LOG = LoggerFactory.getLogger(LearnerHandler.class);
-    //与follower的通信socket
+    //follower的socket
     protected final Socket sock;
 
     public Socket getSocket() {
@@ -376,6 +376,7 @@ public class LearnerHandler extends ZooKeeperThread {
     }
 
     /**
+     * 首先只有当前服务器是leader的时候，才会执行这个类的该方法。leader将接收到的learner连接socket交给该方法处理。
      * This thread will receive packets from the peer and process them and
      * also listen to new connections from new peers.
      */
@@ -387,9 +388,9 @@ public class LearnerHandler extends ZooKeeperThread {
             tickOfNextAckDeadline = leader.self.tick.get()
                     + leader.self.initLimit + leader.self.syncLimit;
 
-            //socket输入流
+            //socket输入流，learner发来的请求
             ia = BinaryInputArchive.getArchive(bufferedInput);
-            //socket输出流
+            //socket输出流，发给learner的响应
             bufferedOutput = new BufferedOutputStream(sock.getOutputStream());
             oa = BinaryOutputArchive.getArchive(bufferedOutput);
 
@@ -466,10 +467,8 @@ public class LearnerHandler extends ZooKeeperThread {
                 oa.writeRecord(newEpochPacket, "packet");
                 bufferedOutput.flush();
 
-                //这里是上面leader发给learner纪元等数据后，learner返回的确认响应
-                //从这看这里持有的是长连接，否则socket应该变更为新的socket，TODO 查一下socket实现类和流逻辑。
+                //这里是上面leader发给learner纪元等数据后，learner返回的确认响应，这里持有的是长连接
                 QuorumPacket ackEpochPacket = new QuorumPacket();
-                //TODO 输入流可以再次读取，这里看下socket
                 ia.readRecord(ackEpochPacket, "packet");
                 if (ackEpochPacket.getType() != Leader.ACKEPOCH) {
                     LOG.error(ackEpochPacket.toString()
@@ -480,13 +479,14 @@ public class LearnerHandler extends ZooKeeperThread {
                 ByteBuffer bbepoch = ByteBuffer.wrap(ackEpochPacket.getData());
                 //使用learner发来的响应epoch，zxid
                 ss = new StateSummary(bbepoch.getInt(), ackEpochPacket.getZxid());
-                //
+                //投票，阻塞等待结束
                 leader.waitForEpochAck(this.getSid(), ss);
             }
             peerLastZxid = ss.getLastZxid();
            
             // Take any necessary action if we need to send TRUNC or DIFF
             // startForwarding() will be called in all cases
+            //leader与follower数据同步，返回是否需要传输快照。注意同步的只有快照，不是事务日志。
             boolean needSnap = syncFollower(peerLastZxid, leader.zk.getZKDatabase(), leader);
             
             /* if we are not truncating or sending a diff just send a snapshot */
@@ -713,11 +713,12 @@ public class LearnerHandler extends ZooKeeperThread {
     /**
      * Determine if we need to sync with follower using DIFF/TRUNC/SNAP
      * and setup follower to receive packets from commit processor
+     * 确定是否需要使用DIFF/TRUNC/SNAP与follower同步，并设置follower从提交处理器接收数据包
      *
      * @param peerLastZxid
      * @param db
      * @param leader
-     * @return true if snapshot transfer is needed.
+     * @return true if snapshot transfer is needed. true=如果需要快照传输.
      */
     public boolean syncFollower(long peerLastZxid, ZKDatabase db, Leader leader) {
         /*
@@ -781,6 +782,15 @@ public class LearnerHandler extends ZooKeeperThread {
              * 5. Follower missed the committedLog. We will try to use on-disk
              *    txnlog + committedLog to sync with follower. If that fail,
              *    we will send snapshot
+             *
+             * 以下是我们要处理的情况：
+             *  1.强制发送快照（出于测试目的）
+             *  2.follower和leader已经同步，发送空diff
+             *  3.follower拥有我们未曾看到的txn。 这可能是旧的leader，所以我们需要发送TRUNC。
+             *      但是，如果对等方具有newEpochZxid，则由于follower没有txnlog
+             *  4.因此我们无法发送TRUNC。follower处于commitLog范围内或已处于同步状态。
+             *      根据follower的zxid，我们可能需要发送DIFF或TRUNC。如果follower已经处于同步状态，则我们总是发送空的DIFF。
+             *  5.follower错过了commitLog。 我们将尝试使用磁盘txnlog + commitLog与follower同步。 如果失败，我们将发送快照
              */
 
             if (forceSnapSync) {
@@ -1012,7 +1022,7 @@ public class LearnerHandler extends ZooKeeperThread {
         QuorumPacket packet = new QuorumPacket(type, zxid, null, null);
         queuePacket(packet);
     }
-    
+
     void queuePacket(QuorumPacket p) {
         queuedPackets.add(p);
     }

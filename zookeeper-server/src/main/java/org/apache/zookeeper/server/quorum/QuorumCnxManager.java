@@ -89,7 +89,7 @@ import org.slf4j.LoggerFactory;
  *
  * 类似有向图结构
  *
- * 如何维持每两个服务器之间维护一个连接：
+ * 如何做到每两个服务器之间维护一个连接：
  *  1. 明确方向，比较server id
  *  2. 只能大的server id实例主动去连接小的server id实例。不能反向，即小的不能主动连接大的。
  *  QuorumConnectionReqThread线程负责初始化连接，实现上面说的这些：
@@ -101,7 +101,12 @@ import org.slf4j.LoggerFactory;
  *       小的不能主动连接大的，所以不允许这个连接存在，会关闭连接。
  *    4. 假如当前服务器serverid=5, 主动连我的服务器id为6，因为大的可以连接小的，允许这个连接存在，缓存到map中。
  *    5. 这就保证了两个服务器之间只能有一个连接存在。
+ *  3. 每个连接实现都是BIO的长连接
  *
+ * ConcurrentHashMap<Long, SendWorker> senderWorkerMap：
+ *          key=远程服务器的sid，不包括当前服务器的sid；
+ *          value=持有长连接的线程，用于和对应的远程服务器通讯。如果向当前服务器发送消息，会将消息直接加到recvQueue中。
+ * ArrayBlockingQueue<Message> recvQueue：接收其他远程服务器和自己发给自己的消息。
  */
 
 public class QuorumCnxManager {
@@ -164,11 +169,12 @@ public class QuorumCnxManager {
     final ConcurrentHashMap<Long, SendWorker> senderWorkerMap;
     //key：serverid  value：队列。 需要发给对应serverid的数据
     final ConcurrentHashMap<Long, ArrayBlockingQueue<ByteBuffer>> queueSendMap;
+    //最后一次发给远程服务器的数据，key：远程服务器sid，value：数据
     final ConcurrentHashMap<Long, ByteBuffer> lastMessageSent;
 
     /*
      * Reception queue
-     * 阻塞队列，接收其他服务端发来的消息
+     * 阻塞队列，接收其他服务端发给当前服务器的消息
      */
     public final ArrayBlockingQueue<Message> recvQueue;
     /*
@@ -178,6 +184,7 @@ public class QuorumCnxManager {
 
     /*
      * Shutdown flag
+     * 旧管理器（即当前管理）关闭标志位
      */
 
     volatile boolean shutdown = false;
@@ -356,6 +363,8 @@ public class QuorumCnxManager {
                 : Thread.currentThread().getThreadGroup();
         final ThreadFactory daemonThFactory = runnable -> new Thread(group, runnable,
             String.format("QuorumConnectionThread-[myid=%d]-%d", mySid, threadIndex.getAndIncrement()));
+
+        //quorumCnxnThreadsSize缺省为20，即线程池容量3-20，无队列容量作缓冲
         this.connectionExecutor = new ThreadPoolExecutor(3, quorumCnxnThreadsSize, 60, TimeUnit.SECONDS,
                                                          new SynchronousQueue<>(), daemonThFactory);
         this.connectionExecutor.allowCoreThreadTimeOut(true);
@@ -395,6 +404,7 @@ public class QuorumCnxManager {
             } else {
                 sock = SOCKET_FACTORY.get();
                 setSockOpts(sock);
+                //主动连接远程选举地址和端口
                 sock.connect(electionAddr, cnxTO);
             }
             LOG.debug("Connected to server " + sid);
@@ -465,6 +475,13 @@ public class QuorumCnxManager {
         }
     }
 
+    /**
+     * 长连接，本地服务器主动连接远程服务器
+     * @param sock 与远程选举地址和端口建立的连接
+     * @param sid 远程服务器sid
+     * @return
+     * @throws IOException
+     */
     private boolean startConnection(Socket sock, Long sid)
             throws IOException {
         DataOutputStream dout = null;
@@ -476,6 +493,7 @@ public class QuorumCnxManager {
             BufferedOutputStream buf = new BufferedOutputStream(sock.getOutputStream());
             dout = new DataOutputStream(buf);
 
+            //选举连接管理器，创建连接后，向远程服务器发送sid等数据
             // Sending id and challenge
             // represents protocol version (in other words - message type)
             dout.writeLong(PROTOCOL_VERSION);
@@ -486,6 +504,7 @@ public class QuorumCnxManager {
             dout.write(addr_bytes);
             dout.flush();
 
+            //对于上面的请求，远程服务器返回的响应
             din = new DataInputStream(
                     new BufferedInputStream(sock.getInputStream()));
         } catch (IOException e) {
@@ -796,14 +815,21 @@ public class QuorumCnxManager {
 
     /**
      * Flag that it is time to wrap up all activities and interrupt the listener.
+     * 标记是时候结束所有活动并中断选举监听器线程。
+     *
+     * halt：停止，关机。
      */
     public void halt() {
+        //只有重新选举的时候才会创建新的管理器，然后销毁旧的管理器，此时会调用旧管理器的halt方法
+        //旧管理器（即当前管理）关闭标志位
         shutdown = true;
         LOG.debug("Halting listener");
+        //关闭选举监听器ServerSocket，不再接受新的连接请求，退出监听器线程。
         listener.halt();
 
         // Wait for the listener to terminate.
         try {
+            //等待选举监听器线程死亡。
             listener.join();
         } catch (InterruptedException ex) {
             LOG.warn("Got interrupted before joining the listener", ex);
@@ -820,6 +846,8 @@ public class QuorumCnxManager {
 
     /**
      * A soft halt simply finishes workers.
+     * 关闭与每个服务端的socket连接，停止对应线程。
+     * 逐步移除senderWorkerMap中的对应线程，清空senderWorkerMap。
      */
     public void softHalt() {
         for (SendWorker sw : senderWorkerMap.values()) {
@@ -926,6 +954,7 @@ public class QuorumCnxManager {
         @Override
         public void run() {
             int numRetries = 0;
+            //选举端口地址
             InetSocketAddress addr;
             Socket client = null;
             Exception exitException = null;
@@ -1035,6 +1064,7 @@ public class QuorumCnxManager {
                 if(ss != null) {
                     LOG.debug("Closing listener: "
                               + QuorumCnxManager.this.mySid);
+                    //关闭ServerSocket 不再接受连接请求
                     ss.close();
                 }
             } catch (IOException e){
@@ -1120,6 +1150,7 @@ public class QuorumCnxManager {
         synchronized void send(ByteBuffer b) throws IOException {
             byte[] msgBytes = new byte[b.capacity()];
             try {
+                //重置position，从头重新读取
                 b.position(0);
                 b.get(msgBytes);
             } catch (BufferUnderflowException be) {
@@ -1147,6 +1178,8 @@ public class QuorumCnxManager {
                  * If the send queue is non-empty, then we have a recent
                  * message than that stored in lastMessage. To avoid sending
                  * stale message, we should send the message in the send queue.
+                 *
+                 * sid:为远程服务器serverid
                  */
                 ArrayBlockingQueue<ByteBuffer> bq = queueSendMap.get(sid);
                 if (bq == null || isSendQueueEmpty(bq)) {
@@ -1177,6 +1210,7 @@ public class QuorumCnxManager {
                         }
 
                         if(b != null){
+                            //每发送一次数据，都会记录一次，为了得知最后一次发给远程服务器的数据是什么
                             lastMessageSent.put(sid, b);
                             send(b);
                         }
