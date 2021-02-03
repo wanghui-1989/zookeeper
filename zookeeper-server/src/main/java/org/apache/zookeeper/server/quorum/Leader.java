@@ -269,7 +269,7 @@ public class Leader {
 
     /**
      * This message is for follower to expect diff
-     * 此消息供follower预期差异
+     * 此消息供follower预期差异，一般用空的表示无差异
      */
     final static int DIFF = 13;
 

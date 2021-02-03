@@ -117,7 +117,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
      */
     private static  boolean failCreate = false;
 
-    //存放客户端client发过来的请求数据
+    //存放learner发过来的请求数据，和client发过来的请求数据
     LinkedBlockingQueue<Request> submittedRequests = new LinkedBlockingQueue<Request>();
     //责任链，这个类似于filter
     private final RequestProcessor nextProcessor;
@@ -149,7 +149,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
                 Request request = submittedRequests.take();
                 long traceMask = ZooTrace.CLIENT_REQUEST_TRACE_MASK;
                 if (request.type == OpCode.ping) {
-                    //客户端ping心跳
+                    //learner ping心跳
                     traceMask = ZooTrace.CLIENT_PING_TRACE_MASK;
                 }
                 if (LOG.isTraceEnabled()) {
@@ -658,11 +658,11 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
     }
 
     /**
-     * 对客户端创建节点请求做前期处理，主要做了几件事：
+     * 对客户端和learner创建节点请求做前期处理，主要做了几件事：
      * 1. 反序列化请求data，校验路径、ACL
      * 2. 如果是顺序节点，patch追加parent.cversion后缀。如果是临时节点set客户端sessionId
      * 3. 根据需要创建的节点类型、内容、version等，生成Record对象，set到request中
-     * 4. 记录节点变化
+     * 4. 记录节点变化，保存的是节点最终成为的状态，非变化值。相当于从outstandingChanges就可以拿到节点最终变成的样子。
      * 注意 这里还没有将新的节点加入到内存树中，也就是在内存树上还没有新节点。
      */
     private void pRequest2TxnCreate(int type, Request request, Record record, boolean deserialize) throws IOException, KeeperException {
@@ -778,7 +778,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
      * This method will be called inside the ProcessRequestThread, which is a
      * singleton, so there will be a single thread calling this code.
      *
-     * 判断request.type，属于客户端的哪一种请求。调用zks.getNextZxid()，拿到递增的zxid，然后处理请求。
+     * 判断request.type，属于learner或者client的哪一种请求。调用zks.getNextZxid()，拿到递增的zxid，然后处理请求。
      * 这里的操作不会对内存树有影响，也就是操作结果不会在内存树生效。只是得到数据应该是什么样，比如创建的节点名称是什么等等。
      *
      * @param request
@@ -790,6 +790,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         request.setTxn(null);
 
         try {
+            //learner请求，或者是转发的client的请求
             switch (request.type) {
             case OpCode.createContainer:
             case OpCode.create:

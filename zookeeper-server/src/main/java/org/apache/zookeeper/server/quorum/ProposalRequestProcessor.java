@@ -113,7 +113,7 @@ public class ProposalRequestProcessor implements RequestProcessor {
             //Follower转发过来的sync同步请求，处理逻辑见类头部注释
             zks.getLeader().processSync((LearnerSyncRequest)request);
         } else {
-            //剩下的请求，主要是其他learner server端转过来的写请求，以及client的读请求。
+            //剩下的请求，主要是其他learner server端转过来的写请求，以及client直连的读写请求。
             //交给下一个处理器执行，即CommitProcessor
             nextProcessor.processRequest(request);
             if (request.getHdr() != null) {

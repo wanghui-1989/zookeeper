@@ -201,6 +201,7 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
                        (request = queuedRequests.poll()) != null) {
                     if (needCommit(request)) {
                         //是创建、删除、修改等写请求，需要提交的请求
+                        //将请求set为正在处理的请求
                         nextPending.set(request);
                     } else {
                         //读数据等不需要提交的读请求

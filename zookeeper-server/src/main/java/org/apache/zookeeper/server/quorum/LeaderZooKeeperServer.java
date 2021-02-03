@@ -46,6 +46,13 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
 
     CommitProcessor commitProcessor;
 
+    /**
+     *  PrepRequestProcessor
+     *      -> ProposalRequestProcessor
+     *          -> CommitProcessor
+     *              -> Leader.ToBeAppliedRequestProcessor
+     *                  -> FinalRequestProcessor
+     */
     PrepRequestProcessor prepRequestProcessor;
 
     /**
@@ -157,6 +164,9 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
          *
          * This is done so that requests from learners won't go through
          * LeaderRequestProcessor which perform local session upgrade.
+         *
+         * 从learner转发过来的请求，一定经过了learner.submitRequest()的校验，
+         * 所以leader不需要再执行submitRequest()了，直接放到prepRequestProcessor的队列即可。
          */
         prepRequestProcessor.processRequest(request);
     }

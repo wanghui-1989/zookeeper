@@ -383,6 +383,7 @@ public class LearnerHandler extends ZooKeeperThread {
     @Override
     public void run() {
         try {
+            //learner发来的数据，不包含client
             //将当前连接处理器注册到leader
             leader.addLearnerHandler(this);
             tickOfNextAckDeadline = leader.self.tick.get()
@@ -533,6 +534,7 @@ public class LearnerHandler extends ZooKeeperThread {
             bufferedOutput.flush();
 
             // Start thread that blast packets in the queue to learner
+            //启动一个线程，从队列拿数据发送给learner
             startSendingPackets();
             
             /*
@@ -570,7 +572,8 @@ public class LearnerHandler extends ZooKeeperThread {
             // so we need to mark when the peer can actually start
             // using the data
             //
-            LOG.debug("Sending UPTODATE message to " + sid);      
+            LOG.debug("Sending UPTODATE message to " + sid);
+            //表明所有follower数据已更新完毕，可以为client提供服务了
             queuedPackets.add(new QuorumPacket(Leader.UPTODATE, -1, null, null));
 
             while (true) {
@@ -592,6 +595,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 int cxid;
                 int type;
 
+                //learner发来的包，非client
                 switch (qp.getType()) {
                 case Leader.ACK:
                     if (this.learnerType == LearnerType.OBSERVER) {
@@ -787,8 +791,8 @@ public class LearnerHandler extends ZooKeeperThread {
              *  1.强制发送快照（出于测试目的）
              *  2.follower和leader已经同步，发送空diff
              *  3.follower拥有我们未曾看到的txn。 这可能是旧的leader，所以我们需要发送TRUNC。
-             *      但是，如果对等方具有newEpochZxid，则由于follower没有txnlog
-             *  4.因此我们无法发送TRUNC。follower处于commitLog范围内或已处于同步状态。
+             *      但是，如果对等方具有newEpochZxid，则由于follower没有txnlog，因此我们无法发送TRUNC。
+             *  4.follower处于commitLog范围内或已处于同步状态。
              *      根据follower的zxid，我们可能需要发送DIFF或TRUNC。如果follower已经处于同步状态，则我们总是发送空的DIFF。
              *  5.follower错过了commitLog。 我们将尝试使用磁盘txnlog + commitLog与follower同步。 如果失败，我们将发送快照
              */
