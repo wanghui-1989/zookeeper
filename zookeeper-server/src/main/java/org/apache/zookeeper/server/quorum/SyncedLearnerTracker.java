@@ -37,6 +37,7 @@ public class SyncedLearnerTracker {
         boolean change = false;
         for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
             if (qvAckset.getQuorumVerifier().getVotingMembers().containsKey(sid)) {
+                //该sid是具有投票权的服务器，添加到已赞同set中
                 qvAckset.getAckset().add(sid);
                 change = true;
             }
@@ -44,6 +45,9 @@ public class SyncedLearnerTracker {
         return change;
     }
 
+    /**
+     * @return true=写数据提案通过者达到半数，投票通过，false=不通过。
+     */
     public boolean hasAllQuorums() {
         for (QuorumVerifierAcksetPair qvAckset : qvAcksetPairs) {
             if (!qvAckset.getQuorumVerifier().containsQuorum(qvAckset.getAckset()))

@@ -90,6 +90,7 @@ public class Follower extends Learner{
                             + " is less than our accepted epoch " + ZxidUtils.zxidToString(self.getAcceptedEpoch()));
                     throw new IOException("Error: Epoch of leader is lower");
                 }
+                //和leader同步数据
                 syncWithLeader(newEpochZxid);                
                 QuorumPacket qp = new QuorumPacket();
                 while (this.isRunning()) {
@@ -114,6 +115,7 @@ public class Follower extends Learner{
 
     /**
      * Examine the packet received in qp and dispatch based on its contents.
+     * 处理leader发来的消息。
      * @param qp
      * @throws IOException
      */
@@ -122,8 +124,10 @@ public class Follower extends Learner{
         case Leader.PING:            
             ping(qp);            
             break;
-        case Leader.PROPOSAL:           
+        case Leader.PROPOSAL:
+            //leader发来的提案消息，如创建节点提案。
             TxnHeader hdr = new TxnHeader();
+            //反序列化消息
             Record txn = SerializeUtils.deserializeTxn(qp.getData(), hdr);
             if (hdr.getZxid() != lastQueued + 1) {
                 LOG.warn("Got zxid 0x"
@@ -131,6 +135,7 @@ public class Follower extends Learner{
                         + " expected 0x"
                         + Long.toHexString(lastQueued + 1));
             }
+            //更新最新消息记录
             lastQueued = hdr.getZxid();
             
             if (hdr.getType() == OpCode.reconfig){

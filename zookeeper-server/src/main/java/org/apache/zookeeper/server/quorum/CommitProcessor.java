@@ -81,6 +81,7 @@ import org.apache.zookeeper.server.ZooKeeperServerListener;
  * -写请求必须以zxid顺序处理
  * -必须确保一个会话中的两次写入之间没有竞争条件，否则会触发另一会话中的读取请求设置监视
  * 当前的实现通过简单地不允许任何读请求与写请求并行处理来解决第三种约束。
+ * 我们使用LinkedBlockingQueue<Request> queuedRequests将并行多请求，转为串行排序的请求。
  */
 public class CommitProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
@@ -109,7 +110,7 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
 
     /**
      * Request for which we are currently awaiting a commit
-     * 我们正在等待提交的请求
+     * 我们正在等待被提交的请求
      */
     protected final AtomicReference<Request> nextPending =
         new AtomicReference<Request>();
@@ -216,6 +217,8 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
                  * Processing committedRequests: check and see if the commit
                  * came in for the pending request. We can only commit a
                  * request when there is no other request being processed.
+                 *
+                 * 处理已确认要提交的请求，将请求数据应用到内存树。
                  */
                 processCommitted();
             }
@@ -228,6 +231,7 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
     /*
      * Separated this method from the main run loop
      * for test purposes (ZOOKEEPER-1863)
+     *
      */
     protected void processCommitted() {
         Request request;
@@ -265,6 +269,7 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
                 // nextProcessor returns.
                 currentlyCommitting.set(pending);
                 nextPending.set(null);
+                //交给下一个处理器，提交数据到内存树。
                 sendToNextProcessor(pending);
             } else {
                 // this request came from someone else so just

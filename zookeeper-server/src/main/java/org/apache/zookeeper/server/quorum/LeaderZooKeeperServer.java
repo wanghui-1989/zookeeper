@@ -48,7 +48,7 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
 
     /**
      *  PrepRequestProcessor
-     *      -> ProposalRequestProcessor
+     *      -> ProposalRequestProcessor（包含独立运行的线程SyncRequestProcessor->AckRequestProcessor）
      *          -> CommitProcessor
      *              -> Leader.ToBeAppliedRequestProcessor
      *                  -> FinalRequestProcessor
@@ -74,7 +74,7 @@ public class LeaderZooKeeperServer extends QuorumZooKeeperServer {
      *
      *     LeaderRequestProcessor
      *       -> PrepRequestProcessor
-     *          -> ProposalRequestProcessor
+     *          -> ProposalRequestProcessor（包含独立运行的线程SyncRequestProcessor->AckRequestProcessor）
      *              -> CommitProcessor
      *                  -> Leader.ToBeAppliedRequestProcessor
      *                      -> FinalRequestProcessor

@@ -37,8 +37,8 @@ import org.slf4j.LoggerFactory;
  * 主要逻辑：
  *  前一个处理器PrepRequestProcessor已经将请求封装好了，到这里其实就是应该由leader发起提案了（对写操作来说）
  *  这个处理器将请求分成两种进行处理，
- *   一个是Follower转发过来的"sync"同步请求。
- *   另一个是剩下的其他请求,主要是其他learner server端转过来的写请求，以及client的读请求。
+ *   1. Follower转发过来的"sync"同步请求。
+ *   2. 剩下的其他请求,主要是其他learner server端转过来的写请求，以及client的读请求。
  *
  * 1.先说如何处理Follower转发过来的"sync"同步请求：
  *   1.zk不能保证每个服务实例在每个时间都具有相同的ZooKeeper数据视图。由于网络延迟之类的因素，
@@ -64,6 +64,7 @@ import org.slf4j.LoggerFactory;
  * 2.剩下的其他请求，主要是其他learner server端转过来的写请求，以及client的读请求。
  *   1.交个下一个处理器执行，即CommitProcessor
  *
+ * TODO 思考何时将提案发给follower？？
  *
  */
 public class ProposalRequestProcessor implements RequestProcessor {
@@ -114,16 +115,18 @@ public class ProposalRequestProcessor implements RequestProcessor {
             zks.getLeader().processSync((LearnerSyncRequest)request);
         } else {
             //剩下的请求，主要是其他learner server端转过来的写请求，以及client直连的读写请求。
-            //交给下一个处理器执行，即CommitProcessor
+            //交给下一个处理器执行，即CommitProcessor，加到阻塞队列里就返回了。
             nextProcessor.processRequest(request);
             if (request.getHdr() != null) {
                 // We need to sync and get consensus on any transactions
                 //我们需要同步并就任何事务达成共识
                 try {
+                    //此时创建提案，发给所有成员，发完就返回。
                     zks.getLeader().propose(request);
                 } catch (XidRolloverException e) {
                     throw new RequestProcessorException(e.getMessage(), e);
                 }
+                //将写请求写入事务日志的磁盘缓冲区，看数量情况批量flush到磁盘。入阻塞队列完毕就返回。
                 syncProcessor.processRequest(request);
             }
         }

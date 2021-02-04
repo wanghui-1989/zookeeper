@@ -80,11 +80,17 @@ public class FollowerZooKeeperServer extends LearnerZooKeeperServer {
 
     LinkedBlockingQueue<Request> pendingTxns = new LinkedBlockingQueue<Request>();
 
+    /**
+     * 将消息写入事务日志
+     * @param hdr hdr
+     * @param txn txn
+     */
     public void logRequest(TxnHeader hdr, Record txn) {
         Request request = new Request(hdr.getClientId(), hdr.getCxid(), hdr.getType(), hdr, txn, hdr.getZxid());
         if ((request.zxid & 0xffffffffL) != 0) {
             pendingTxns.add(request);
         }
+        //提交给SyncRequestProcessor处理器执行，基本逻辑就是写事务日志，看情况flush到磁盘
         syncProcessor.processRequest(request);
     }
 

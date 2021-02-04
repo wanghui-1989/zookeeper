@@ -201,7 +201,7 @@ public class FileTxnLog implements TxnLog, Closeable {
      * @param txn the transaction part of the entry
      * returns true iff something appended, otw false
      *
-     * 追加的格式如类头注释
+     * 追加事务日志，追加的格式如类头注释
      */
     public synchronized boolean append(TxnHeader hdr, Record txn)
         throws IOException

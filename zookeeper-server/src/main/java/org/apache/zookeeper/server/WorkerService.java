@@ -107,6 +107,8 @@ public class WorkerService {
      * assignment is a single mod operation on the number of threads.  If a
      * worker thread pool is not being used, work is done directly by
      * this thread.
+     *
+     * id为sessionId，不是zxid。
      */
     public void schedule(WorkRequest workRequest, long id) {
         if (stopped) {
@@ -122,7 +124,7 @@ public class WorkerService {
         int size = workers.size();
         if (size > 0) {
             try {
-                //对zxid取余，保证同一个zxid，分配到同一个线程，保证顺序执行。
+                //对sessionId取余，保证同一个sessionId，分配到同一个线程，保证顺序执行。
                 // make sure to map negative ids as well to [0, size-1]
                 int workerNum = ((int) (id % size) + size) % size;
                 ExecutorService worker = workers.get(workerNum);

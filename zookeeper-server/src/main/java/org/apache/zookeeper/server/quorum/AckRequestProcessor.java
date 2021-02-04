@@ -28,6 +28,7 @@ import org.apache.zookeeper.server.RequestProcessor;
 /**
  * This is a very simple RequestProcessor that simply forwards a request from a
  * previous stage to the leader as an ACK.
+ * 这是一个非常简单的RequestProcessor，它只是将前一阶段的请求作为ACK转发给leader。
  */
 class AckRequestProcessor implements RequestProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AckRequestProcessor.class);
@@ -43,6 +44,7 @@ class AckRequestProcessor implements RequestProcessor {
     public void processRequest(Request request) {
         QuorumPeer self = leader.self;
         if(self != null)
+            //leader自身，将请求作为应答，发回给leader。
             leader.processAck(self.getId(), request.zxid, null);
         else
             LOG.error("Null QuorumPeer");

@@ -266,6 +266,9 @@ public class ZKDatabase {
      * maintains a list of last <i>committedLog</i>
      *  or so committed requests. This is used for
      * fast follower synchronization.
+     *
+     * 维护最后一个commitLog或已提交请求的列表。 这用于快速和follower同步。
+     *
      * @param request committed request
      */
     public void addCommittedProposal(Request request) {

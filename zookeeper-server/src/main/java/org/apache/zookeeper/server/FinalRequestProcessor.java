@@ -84,9 +84,9 @@ import java.util.Locale;
  *
  * This RequestProcessor counts on ZooKeeperServer to populate the
  * outstandingRequests member of ZooKeeperServer.
- * 该请求处理器实际上应用与请求关联的任何事务并为任何查询提供服务。
- * 它始终位于RequestProcessor链的末尾（因此具有名称），因此它没有nextProcessor成员。
- * 这个RequestProcessor依靠ZooKeeperServer来填充ZooKeeperServer的未完成请求成员。
+ * 该处理器始终位于RequestProcessor链的末尾（因此具有名称），因此它没有nextProcessor成员。
+ * 作用：将已确认需要提交，待应用到内存树的请求数据，应用到内存树，即完成提交操作。
+ * 完成提交后，该数据对外部可见。
  */
 public class FinalRequestProcessor implements RequestProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(FinalRequestProcessor.class);
@@ -136,6 +136,8 @@ public class FinalRequestProcessor implements RequestProcessor {
 
             // do not add non quorum packets to the queue.
             if (request.isQuorum()) {
+                //请求是需要仲裁的，主要是写请求，比如创建节点，如果是读请求一般都不需要仲裁。
+                //添加到已提交列表中，用于快速与follower同步数据使用。
                 zks.getZKDatabase().addCommittedProposal(request);
             }
         }

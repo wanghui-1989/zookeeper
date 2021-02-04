@@ -275,7 +275,7 @@ public class Leader {
 
     /**
      * This is for follower to truncate its logs
-     * 这是为了让follower删除它的日志
+     * 这是为了让follower删除它的事务日志
      */
     final static int TRUNC = 14;
 
@@ -307,6 +307,7 @@ public class Leader {
     /**
      * This message type is sent by the leader to indicate that the follower is
      * now uptodate andt can start responding to clients.
+     * leader发给follower，表示follower数据已经同步更新完成，可以响应客户端请求了。
      */
     final static int UPTODATE = 12;
 
@@ -341,12 +342,14 @@ public class Leader {
     /**
      * This message type is sent by a leader to commit a proposal and cause
      * followers to start serving the corresponding data.
+     * leader发给follower，让follower提交提案。
      */
     final static int COMMIT = 4;
 
     /**
      * This message type is enchanged between follower and leader (initiated by
      * follower) to determine liveliness.
+     * 由follower向leader发起ping请求，用来确定leader存活。
      */
     final static int PING = 5;
 
@@ -363,6 +366,7 @@ public class Leader {
 
     /**
      * This message type informs observers of a committed proposal.
+     * 通知Observer，发送的数据是刚刚表决通过并已提交的提案。
      */
     final static int INFORM = 8;
     
@@ -376,7 +380,7 @@ public class Leader {
      */
     final static int INFORMANDACTIVATE = 19;
 
-    //将要发送出去的提案 key：zxid，value：提案
+    //提案，包括从将要发送出去的 到 还没完成投票commit的提案。 key：zxid，value：提案
     final ConcurrentMap<Long, Proposal> outstandingProposals = new ConcurrentHashMap<Long, Proposal>();
 
     //通过投票，将被应用的提案
@@ -773,6 +777,7 @@ public class Leader {
     }
 
     /**
+     * 尝试commit事务，true=成功，false=失败。
      * @return True if committed, otherwise false.
      **/
     synchronized public boolean tryToCommit(Proposal p, long zxid, SocketAddress followerAddr) {       
@@ -783,26 +788,37 @@ public class Leader {
        // pending all wait for a quorum of old and new config, so it's not possible to get enough acks
        // for an operation without getting enough acks for preceding ops. But in the future if multiple
        // concurrent reconfigs are allowed, this can happen.
+       // 确保操作按顺序提交。 通过重新配置，现在有可能不同的操作等待不同的ack组，而我们仍然要强制要求它们按顺序提交。
+        // 当前，我们仅允许进行一次未完成的重新配置，以便在重新配置未决期间提出的重新配置和随后提出的未完成操作都将等待一定数量的新旧配置，
+        // 因此，如果没有为先前的操作获得足够的确认，就不可能获得足够的操作确认。
+        // 但是将来如果允许多个并发重新配置，则可能会发生这种情况。
+
+       //用入参的zxid-1，作为新的zxid去outstandingProposals中取对应的提案，
+       // 如果不为空的话，就表示前一个提案还没有提交，不符合提交顺序，zk强制要求它们按顺序提交。
        if (outstandingProposals.containsKey(zxid - 1)) return false;
        
        // in order to be committed, a proposal must be accepted by a quorum.
        //
        // getting a quorum from all necessary configurations.
+       // 投票未达半数，投票不通过
         if (!p.hasAllQuorums()) {
            return false;                 
         }
         
         // commit proposals in order
+        //当前待提交的zxid不是紧跟在上一次提交的zxid之后的，不是按顺序提交。
         if (zxid != lastCommitted+1) {    
            LOG.warn("Commiting zxid 0x" + Long.toHexString(zxid)
                     + " from " + followerAddr + " not first!");
             LOG.warn("First is "
                     + (lastCommitted+1));
         }     
-        
+
+        //移除提案
         outstandingProposals.remove(zxid);
         
         if (p.request != null) {
+             //将该提案请求添加到待应用到内存DBTree的队列中
              toBeApplied.add(p);
         }
 
@@ -833,9 +849,13 @@ public class Leader {
             informAndActivate(p, designatedLeader);
             //turnOffFollowers();
         } else {
+            //创建发送commit包给follower，通知他们提交请求。
             commit(zxid);
+            //创建发送INFORM包给observer，通知他们接收请求中包含的事务数据。
             inform(p);
         }
+
+        //调用CommitProcessor.commit
         zk.commitProcessor.commit(p.request);
         if(pendingSyncs.containsKey(zxid)){
             for(LearnerSyncRequest r: pendingSyncs.remove(zxid)) {
@@ -850,11 +870,13 @@ public class Leader {
      * Keep a count of acks that are received by the leader for a particular
      * proposal
      *
+     * 保留leader收到的提案应答的计数
+     *
      * @param zxid, the zxid of the proposal sent out
      * @param sid, the id of the server that sent the ack
      * @param followerAddr
      */
-    synchronized public void processAck(long sid, long zxid, SocketAddress followerAddr) {        
+    synchronized public void processAck(long sid, long zxid, SocketAddress followerAddr) {
         if (!allowedToCommit) return; // last op committed was a leader change - from now on 
                                      // the new leader should commit        
         if (LOG.isTraceEnabled()) {
@@ -891,13 +913,17 @@ public class Leader {
             // The proposal has already been committed
             return;
         }
+
+        //根据zxid取出提案
         Proposal p = outstandingProposals.get(zxid);
         if (p == null) {
             LOG.warn("Trying to commit future proposal: zxid 0x{} from {}",
                     Long.toHexString(zxid), followerAddr);
             return;
         }
-        
+
+        //只要是收到了投票人的应答，就表示投票人赞同提案。
+        //将投票人的sid放到所有赞同的投票人set中。
         p.addAck(sid);        
         /*if (LOG.isDebugEnabled()) {
             LOG.debug("Count for zxid: 0x{} is {}",
@@ -937,8 +963,7 @@ public class Leader {
          * FinalRequestProcessor.processRequest MUST process the request
          * synchronously!
          *
-         * 该请求处理器仅维护toBeApplied列表。
-         * 为此，接下来必须是FinalRequestProcessor和FinalRequestProcessor.processRequest必须同步处理请求！
+         * 该请求处理器仅维护toBeApplied列表。将已确定提交，待应用到内存树的请求转发给下一个处理器执行。
          *
          * @param next
          *                a reference to the FinalRequestProcessor
@@ -970,6 +995,7 @@ public class Leader {
             // the zxid of the last write op.
             if (request.getHdr() != null) {
                 long zxid = request.getHdr().getZxid();
+                //通过投票，将被应用的提案
                 Iterator<Proposal> iter = leader.toBeApplied.iterator();
                 if (iter.hasNext()) {
                     Proposal p = iter.next();
@@ -1018,15 +1044,19 @@ public class Leader {
         }
     }
 
+    //使用该值记录最后一次提交的zxid
+    //配合当前leader对象锁，和zxid+1 -1 来判断事务是否是按大小顺序提交的
+    // 强制按zxid大小顺序提交就是这么做的
     long lastCommitted = -1;
 
     /**
      * Create a commit packet and send it to all the members of the quorum
-     *
+     * 创建一个commit包，发到所有具有投票权的follower
      * @param zxid
      */
     public void commit(long zxid) {
         synchronized(this){
+            //更新lastCommitted zxid
             lastCommitted = zxid;
         }
         QuorumPacket qp = new QuorumPacket(Leader.COMMIT, zxid, null, null);
@@ -1049,6 +1079,7 @@ public class Leader {
 
     /**
      * Create an inform packet and send it to all observers.
+     * 创建一个通知数据包，并将其发送给所有观察者。
      */
     public void inform(Proposal proposal) {
         QuorumPacket qp = new QuorumPacket(Leader.INFORM, proposal.request.zxid,

@@ -28,6 +28,9 @@ import org.apache.zookeeper.ZooDefs.OpCode;
 import org.apache.zookeeper.server.Request;
 import org.apache.zookeeper.server.RequestProcessor;
 
+/**
+ * follower使用，向leader发送应答。
+ */
 public class SendAckRequestProcessor implements RequestProcessor, Flushable {
     private static final Logger LOG = LoggerFactory.getLogger(SendAckRequestProcessor.class);
 
@@ -39,6 +42,7 @@ public class SendAckRequestProcessor implements RequestProcessor, Flushable {
 
     public void processRequest(Request si) {
         if(si.type != OpCode.sync){
+            //不是sync请求，直接应答。即如果是投票的话，就是表示赞同。
             QuorumPacket qp = new QuorumPacket(Leader.ACK, si.getHdr().getZxid(), null,
                 null);
             try {
