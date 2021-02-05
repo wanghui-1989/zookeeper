@@ -297,7 +297,10 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
          * been initialized or not. Note that this method is
          * invoked by at least one other method: 
          * ZooKeeperServer#startdata.
-         *  
+         *
+         * 当新领导者开始执行Leader＃lead时，它将调用此方法。 但是，已在运行领导者选举之前初始化了数据库，
+         * 我们不需要再次初始化它，并且避免了再次加载它的麻烦。 不重新加载它对于承载大型数据库的应用程序尤为重要。
+         *
          * See ZOOKEEPER-1642 for more detail.
          */
         if(zkDb.isInitialized()){

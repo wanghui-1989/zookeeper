@@ -686,6 +686,7 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
                 ByteBuffer responseBuffer = ByteBuffer.wrap(b);
                 DatagramPacket packet = new DatagramPacket(b, b.length);
                 while (running) {
+                    //udp是最早的选举算法使用的，已经废弃了
                     udpSocket.receive(packet);
                     if (packet.getLength() != 4) {
                         LOG.warn("Got more than just an xid! Len = "
@@ -1242,6 +1243,8 @@ public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider 
              * Main loop
              */
             while (running) {
+                //FastLeaderElection选举完成，确定当前peer的角色后，会更新peerState，当前循环就会知道新的角色是什么了。
+                //当前peer会根据新的角色执行逻辑。
                 switch (getPeerState()) {
                 case LOOKING:
                     //选主

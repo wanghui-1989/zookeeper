@@ -974,6 +974,7 @@ public class FastLeaderElection implements Election {
                     /*
                      * Only proceed if the vote comes from a replica in the current or next
                      * voting view for a replica in the current or next voting view.
+                     * 查看其他投票方的状态
                      */
                     switch (n.state) {
                     case LOOKING:
@@ -1035,6 +1036,9 @@ public class FastLeaderElection implements Election {
                             /*
                              * This predicate is true once we don't read any new
                              * relevant message from the reception queue
+                             *
+                             * n=null，表示没有收到任何其他投票人发来的投票，此时可能是集群网络原因，导致连接中断，
+                             * 判断当前只有自己了，根据自己之前的投票proposedLeader，来决定自己是leader还是follower。
                              */
                             if (n == null) {
                                 self.setPeerState((proposedLeader == self.getId()) ?
@@ -1063,6 +1067,9 @@ public class FastLeaderElection implements Election {
                             if(termPredicate(recvset, new Vote(n.version, n.leader,
                                             n.zxid, n.electionEpoch, n.peerEpoch, n.state))
                                             && checkLeader(outofelection, n.leader, n.electionEpoch)) {
+                                //更新当前peer的角色为LEADING 或者 FOLLOWING
+                                //QuorumPeer.run中的while循环，会不断的循环判断peerState的值，选举完成后，
+                                //peerState的值确定了，就会走新的角色逻辑。
                                 self.setPeerState((n.leader == self.getId()) ?
                                         ServerState.LEADING: learningState());
                                 Vote endVote = new Vote(n.leader, 

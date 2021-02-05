@@ -437,7 +437,7 @@ public class LearnerHandler extends ZooKeeperThread {
             }
                         
             if (qp.getType() == Leader.OBSERVERINFO) {
-                  //缺省类型是follower，而当前learner是obsever
+                  //缺省类型是follower，而当前learner是observer
                   learnerType = LearnerType.OBSERVER;
             }
 
@@ -463,7 +463,7 @@ public class LearnerHandler extends ZooKeeperThread {
                 byte ver[] = new byte[4];
                 ByteBuffer.wrap(ver).putInt(0x10000);
                 //上面收到learner的基础信息包，计算出最新的epoch后，这里把epoche，zxid，version等发给learner
-                //这个是learner收到的第一个包。
+                //这个是发给learners的第一个包。
                 QuorumPacket newEpochPacket = new QuorumPacket(Leader.LEADERINFO, newLeaderZxid, ver, null);
                 oa.writeRecord(newEpochPacket, "packet");
                 bufferedOutput.flush();

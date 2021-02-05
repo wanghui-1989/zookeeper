@@ -222,6 +222,8 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
                     //添加到待flush列表
                     toFlush.add(si);
                     if (toFlush.size() > 1000) {
+                        //上面的追加写事务日志，是追加到缓冲区，没有执行flush操作，对事物文件来说，我们只是将文件头写入到磁盘了，
+                        //文件内容等待将toFlush批量flush到磁盘。
                         //大于1000时，批量刷新，这里体现了批量写磁盘
                         //flush方法内部会执行nextProcessor.processRequest
                         flush(toFlush);
@@ -242,6 +244,7 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
         if (toFlush.isEmpty())
             return;
 
+        //看这个最底层的逻辑，是将所有的输出流都flush，确保写入磁盘。
         zks.getZKDatabase().commit();
         while (!toFlush.isEmpty()) {
             Request i = toFlush.remove();
@@ -251,6 +254,9 @@ public class SyncRequestProcessor extends ZooKeeperCriticalThread implements
                 nextProcessor.processRequest(i);
             }
         }
+
+        //SendAckRequestProcessor实现了Flushable接口，
+        //flush方法逻辑是将上面while循环里写到缓冲区的所有request响应flush到底层网络io，发给leader。
         if (nextProcessor != null && nextProcessor instanceof Flushable) {
             ((Flushable)nextProcessor).flush();
         }

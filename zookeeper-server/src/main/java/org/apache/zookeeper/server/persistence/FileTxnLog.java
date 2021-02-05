@@ -253,7 +253,7 @@ public class FileTxnLog implements TxnLog, Closeable {
         crc.update(buf, 0, buf.length);
         //写校验码
         oa.writeLong(crc.getValue(), "txnEntryCRC");
-        //写数据
+        //将buf内容写入oa
         Util.writeTxnBytes(oa, buf);
 
         return true;
@@ -366,7 +366,7 @@ public class FileTxnLog implements TxnLog, Closeable {
                 }
             }
         }
-        //刷新完 关闭流
+        //刷新完，只保留1个输出流，关闭其他多余的输出流
         while (streamsToFlush.size() > 1) {
             streamsToFlush.removeFirst().close();
         }

@@ -80,6 +80,9 @@ import org.slf4j.LoggerFactory;
  * Although this is not a problem for the leader election, it could be a problem
  * when consolidating peer communication. This is to be verified, though.
  *
+ * 以下逻辑是只有选举是这么做的。
+ * 选举是用的选举端口，只能大的连接小的。而选举过后正常服务，使用的服务端口，是所有follower主动连接leader，不是分大小。
+ *
  * 此类为使用TCP的领导者选举实现了一个连接管理器。它为每两个服务器维护一个连接。
  * 棘手的部分是要确保每两个运行正确并且可以通过网络进行通信的服务器之间都只能有一个连接。
  * 如果两个服务器尝试同时启动连接，则连接管理器将使用一种非常简单的打破平局机制，根据双方的IP地址来决定删除哪个连接。

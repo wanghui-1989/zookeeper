@@ -483,6 +483,12 @@ public class Leader {
 
         zk.registerJMX(new LeaderBean(this, zk), self.jmxLocalPeerBean);
 
+        //在follower确定自己是follower后，follower首先会主动连接leader，发送自己的数据信息
+        //而leader在确定自己是leader后，不会主动去连接follower，而是等着follower来连。
+        //leader收到follower的信息后，创建并启动learnerHandler线程，交给该线程处理，内部会调用投票算法，算出最新的epoch，
+        //然后leader会将确定的最新epoch等发给所有follower。
+        //总结就是选举过后，确定了自己的角色，然后follower发的第一个包是自己的信息，leader发的第一个包是确定后的新纪元等信息。
+
         try {
             self.tick.set(0);
             zk.loadData();
@@ -491,10 +497,12 @@ public class Leader {
 
             // Start thread that waits for connection requests from
             // new followers.
-            //learner与leader数据同步线程
+            //learner与leader连接ServerSocket.accept线程
             cnxAcceptor = new LearnerCnxAcceptor();
             cnxAcceptor.start();
 
+            //每个follower确定自己为follower后，会主动连接leader，发送sid和zxid等，
+            //在LearnerHandler接收到follower消息后，也会调这个方法，帮助leader确定新的epoch
             long epoch = getEpochToPropose(self.getId(), self.getAcceptedEpoch());
 
             zk.setZxid(ZxidUtils.makeZxid(epoch, 0));
@@ -551,8 +559,9 @@ public class Leader {
             // We have to get at least a majority of servers in sync with
             // us. We do this by waiting for the NEWLEADER packet to get
             // acknowledged
-                       
+            // 阻塞等待确定epoch
              waitForEpochAck(self.getId(), leaderStateSummary);
+             //
              self.setCurrentEpoch(epoch);    
             
              try {
