@@ -63,18 +63,23 @@ public class Observer extends Learner{
         zk.registerJMX(new ObserverBean(this, zk), self.jmxLocalPeerBean);
 
         try {
+            //找leader
             QuorumServer leaderServer = findLeader();
             LOG.info("Observing " + leaderServer.addr);
             try {
+                //连接leader
                 connectToLeader(leaderServer.addr, leaderServer.hostname);
                 long newLeaderZxid = registerWithLeader(Leader.OBSERVERINFO);
                 if (self.isReconfigStateChange())
                    throw new Exception("learned about role change");
- 
+
+                //和leader同步
                 syncWithLeader(newLeaderZxid);
                 QuorumPacket qp = new QuorumPacket();
                 while (this.isRunning()) {
+                    //读数据
                     readPacket(qp);
+                    //处理数据
                     processPacket(qp);
                 }
             } catch (Exception e) {
@@ -95,6 +100,8 @@ public class Observer extends Learner{
 
     /**
      * Controls the response of an observer to the receipt of a quorumpacket
+     *
+     * observer不处理PROPOSAL、COMMIT、UPTODATE包，写操作他收到leader发来的是INFORM包
      * @param qp
      * @throws Exception 
      */

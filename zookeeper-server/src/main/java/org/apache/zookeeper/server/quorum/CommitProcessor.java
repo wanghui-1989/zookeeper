@@ -82,6 +82,25 @@ import org.apache.zookeeper.server.ZooKeeperServerListener;
  * -必须确保一个会话中的两次写入之间没有竞争条件，否则会触发另一会话中的读取请求设置监视
  * 当前的实现通过简单地不允许任何读请求与写请求并行处理来解决第三种约束。
  * 我们使用LinkedBlockingQueue<Request> queuedRequests将并行多请求，转为串行排序的请求。
+ *
+ *
+ * 说下它的流程：
+ *    1. 对服务器来说，只会启动一个CommitProcessor线程。
+ *    2. 在线程第一次运行时，因为queuedRequests和committedRequests都为空，所以线程阻塞wait。
+ *    3. 然后上一个处理器调用CommitProcessor.processRequest()提交请求到queuedRequests队列中。
+ *    4. 因为此时是第一个请求，无待commit请求，所以会调用notifyAll唤醒阻塞的所有线程。
+ *    5. 线程唤醒后，因为queuedRequests不为空，所以跳出while循环，向下走。此时下一个while循环为true，因为没有待commit或者正在commit的请求，而且从queuedRequests拉数据不为空。
+ *    6. 判断这个请求是不是需要被commit的请求，即写请求。
+ *       1. 如果是读请求，更新正在处理请求的计数numRequestsProcessing+1，根据请求的sessionId对线程数组取余，拿到执行线程，封装成任务，提交给该线程，线程内操作就是将该读请求提交给下一个执行器。即调用nextProcessor.processRequest(request);一般就是走到FinalRequestProcessor，会根据路径取对应内存DataTree的node节点，将数据封装成响应，写回给客户端。回到CommitProcessor后会执行finally块，里面会将currentlyCommitting置为null，将正在处理请求的计数numRequestsProcessing-1。相当于该numRequestsProcessing最大值为1。
+ *       2. 如果是写请求，则set为待commit请求，赋值给nextPending变量。因为有了待commit请求，所以再走while循环条件不成立，跳出while，向下走。
+ *    7. 因为committedRequests为空，所以if条件不成立，走回while循环，继续阻塞wait。
+ *    8. 假如后来再有一个写请求入队queuedRequests。根据上面说的逻辑，会赋值给nextPending变量。
+ *    9. 假如leader对写的请求投票结束，确定要commit该数据，会给Follower发送COMMIT,给Observer发送INFORM命令。处理器链会调用CommitProcessor.commit，将待commit请求入队committedRequests。调用notifyAll唤醒阻塞线程。
+ *    10. 此时因为committedRequests不为空，并且也没有正在commit的请求，所以跳出while，向下走。
+ *    11. 从committedRequests出队该已确定要被提交的请求，set为正在commit的请求，即赋值给currentlyCommitting。然后将待commit变量置为null，即nextPending为null。
+ *    12. 更新正在处理请求的计数numRequestsProcessing+1，根据请求的sessionId对线程数组取余，拿到执行线程，封装成任务，提交给该线程，线程内操作就是将该读请求提交给下一个执行器。即调用nextProcessor.processRequest(request);一般就是走到FinalRequestProcessor。FinalRequestProcessor会将写请求的数据，写到内存DataTree上，写成功响应给client。
+ *    13. 回到CommitProcessor后会执行finally块，里面会将currentlyCommitting置为null，将正在处理请求的计数numRequestsProcessing-1。相当于该numRequestsProcessing最大值为1。
+ *    14. 假如在有一个写请求处于待commit状态，且CommitProcessor线程处于wait状态，此时有一个读请求或者写请求被上一个处理器塞到了queuedRequests中，因为CommitProcessor线程阻塞等待leader的提交命令来唤醒，所以在没有leader的commit命令之前，都是阻塞的，不会从queuedRequests队列中去拿后面的读或者写请求。相当于没有写的情况下，可以同时有多个读，只要有写的情况下，只能有一个写。很类似于读写锁。
  */
 public class CommitProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
@@ -103,14 +122,14 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
 
     /**
      * Requests that have been committed.
-     * 已提交的请求
+     * 已提交的请求。即已经投票通过，leader确定可以提交的请求。
      */
     protected final LinkedBlockingQueue<Request> committedRequests =
         new LinkedBlockingQueue<Request>();
 
     /**
      * Request for which we are currently awaiting a commit
-     * 我们正在等待被提交的请求
+     * 等待leader commit命令的请求
      */
     protected final AtomicReference<Request> nextPending =
         new AtomicReference<Request>();
@@ -183,10 +202,17 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
         try {
             while (!stopped) {
                 synchronized(this) {
+                    //未停止
+                    //并且 （
+                    //        （待处理请求队列为空  或者  有等待commit请求  或者 有正在执行commit请求）
+                    //  并且 （已提交的请求队列为空  或者 正在处理的请求数量>0  ）
+                    // ）
                     while (
                         !stopped &&
                         ((queuedRequests.isEmpty() || isWaitingForCommit() || isProcessingCommit()) &&
                          (committedRequests.isEmpty() || isProcessingRequest()))) {
+                        //总之就是队列为空 或者 有待提交的写请求，线程阻塞等着
+                        //队列为空阻塞等，有正在处理的写请求时，不能处理其他读写请求。
                         wait();
                     }
                 }
@@ -200,6 +226,7 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
                 while (!stopped && !isWaitingForCommit() &&
                        !isProcessingCommit() &&
                        (request = queuedRequests.poll()) != null) {
+                    //无正在处理的写请求，并且queuedRequests有数据
                     if (needCommit(request)) {
                         //是创建、删除、修改等写请求，需要提交的请求
                         //将请求set为正在处理的请求
@@ -254,6 +281,9 @@ public class CommitProcessor extends ZooKeeperCriticalThread implements
              * next request when it is committed. We also want to
              * use nextPending because it has the cnxn member set
              * properly.
+             *
+             * 我们与nextPending匹配，以便在提交后可以移至下一个请求。
+             * 我们还想使用nextPending，因为它已正确设置了cnxn成员。
              */
             Request pending = nextPending.get();
             if (pending != null &&

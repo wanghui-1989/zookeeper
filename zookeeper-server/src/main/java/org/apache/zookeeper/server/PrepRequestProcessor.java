@@ -149,7 +149,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
                 Request request = submittedRequests.take();
                 long traceMask = ZooTrace.CLIENT_REQUEST_TRACE_MASK;
                 if (request.type == OpCode.ping) {
-                    //learner ping心跳
+                    //客户端发来的ping请求
                     traceMask = ZooTrace.CLIENT_PING_TRACE_MASK;
                 }
                 if (LOG.isTraceEnabled()) {
@@ -790,7 +790,7 @@ public class PrepRequestProcessor extends ZooKeeperCriticalThread implements
         request.setTxn(null);
 
         try {
-            //learner请求，或者是转发的client的请求
+            //learner或者是learner转发的client的请求。或者是client直连发来的请求。
             switch (request.type) {
             case OpCode.createContainer:
             case OpCode.create:

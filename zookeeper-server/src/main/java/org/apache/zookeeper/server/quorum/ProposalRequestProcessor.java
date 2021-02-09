@@ -64,7 +64,6 @@ import org.slf4j.LoggerFactory;
  * 2.剩下的其他请求，主要是其他learner server端转过来的写请求，以及client的读请求。
  *   1.交个下一个处理器执行，即CommitProcessor
  *
- * TODO 思考何时将提案发给follower？？
  *
  */
 public class ProposalRequestProcessor implements RequestProcessor {

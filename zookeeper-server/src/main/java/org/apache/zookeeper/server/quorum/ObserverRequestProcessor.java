@@ -35,6 +35,7 @@ import org.apache.zookeeper.txn.ErrorTxn;
 /**
  * This RequestProcessor forwards any requests that modify the state of the
  * system to the Leader.
+ * 该RequestProcessor将修改系统状态的所有请求转发给Leader。
  */
 public class ObserverRequestProcessor extends ZooKeeperCriticalThread implements
         RequestProcessor {
@@ -79,7 +80,11 @@ public class ObserverRequestProcessor extends ZooKeeperCriticalThread implements
                 // We want to queue the request to be processed before we submit
                 // the request to the leader so that we are ready to receive
                 // the response
+                //我们希望在将请求提交给leader之前将要处理的请求入队，以便我们准备好接收请求对应的leader响应
+                //nextProcessor为CommitProcessor，这里直接放入CommitProcessor队列就返回了。接着向下处理，即转发写请求给leader。
                 nextProcessor.processRequest(request);
+
+                //下面是后置处理
 
                 // We now ship the request to the leader. As with all
                 // other quorum operations, sync also follows this code
@@ -102,6 +107,7 @@ public class ObserverRequestProcessor extends ZooKeeperCriticalThread implements
                 case OpCode.setACL:
                 case OpCode.multi:
                 case OpCode.check:
+                    //内部转发请求给leader
                     zks.getObserver().request(request);
                     break;
                 case OpCode.createSession:

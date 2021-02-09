@@ -81,7 +81,8 @@ import org.slf4j.LoggerFactory;
  * when consolidating peer communication. This is to be verified, though.
  *
  * 以下逻辑是只有选举是这么做的。
- * 选举是用的选举端口，只能大的连接小的。而选举过后正常服务，使用的服务端口，是所有follower主动连接leader，不是分大小。
+ * 选举是用的选举端口，只保留sid大的连接小的连接。
+ * 而选举过后正常服务时，使用的是服务端口，是所有follower主动连接leader，只保留这个方向的连接，不管sid大小。
  *
  * 此类为使用TCP的领导者选举实现了一个连接管理器。它为每两个服务器维护一个连接。
  * 棘手的部分是要确保每两个运行正确并且可以通过网络进行通信的服务器之间都只能有一个连接。

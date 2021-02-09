@@ -60,6 +60,13 @@ import org.slf4j.LoggerFactory;
  * Leader将为每个learner创建一个此类的实例。 与learner的所有交流都由该类处理。
  * 每一个实例连接一个learner，与这个learner的所有通信由这个线程实例负责。
  *
+ * 关于PING:
+ *  1. 对于服务端来说，PING命令只会由leader主动ping所有follower，follower对ping命令返回响应。follower不会主动ping leader。
+ *  2. 对于客户端来说，只会有client主动ping服务端，服务端返回ping的响应，不会有服务端主动ping客户端。
+ *      2.1 客户端ping服务端超时，或者可以判定连接的服务端不再存活，此时客户端会根据配置信息，另选一个服务器尝试再次连接。
+ *
+ *
+ *
  */
 public class LearnerHandler extends ZooKeeperThread {
     private static final Logger LOG = LoggerFactory.getLogger(LearnerHandler.class);
@@ -75,7 +82,11 @@ public class LearnerHandler extends ZooKeeperThread {
     /** Deadline for receiving the next ack. If we are bootstrapping then
      * it's based on the initLimit, if we are done bootstrapping it's based
      * on the syncLimit. Once the deadline is past this learner should
-     * be considered no longer "sync'd" with the leader. */
+     * be considered no longer "sync'd" with the leader.
+     *
+     * 收到下一个确认的截止日期。 如果我们正在引导，那么它基于initLimit，
+     * 如果我们完成了引导，则它基于syncLimit。 一旦超过最后期限，就不再认为此学习者与领导者“同步”。
+     */
     volatile long tickOfNextAckDeadline;
     
     /**
@@ -384,7 +395,7 @@ public class LearnerHandler extends ZooKeeperThread {
     public void run() {
         try {
             //learner发来的数据，不包含client
-            //将当前连接处理器注册到leader
+            //将当前learner连接处理器注册到leader
             leader.addLearnerHandler(this);
             tickOfNextAckDeadline = leader.self.tick.get()
                     + leader.self.initLimit + leader.self.syncLimit;
@@ -447,7 +458,7 @@ public class LearnerHandler extends ZooKeeperThread {
             long peerLastZxid;
             StateSummary ss = null;
             long zxid = qp.getZxid();
-            //获取或者投票计算新的epoch
+            //获取或者投票计算新的epoch，投票最终结果没有出来之前，此处一直阻塞等待
             long newEpoch = leader.getEpochToPropose(this.getSid(), lastAcceptedEpoch);
             //到这就是已经投票确定了最新的epoch了
             long newLeaderZxid = ZxidUtils.makeZxid(newEpoch, 0);
@@ -480,14 +491,16 @@ public class LearnerHandler extends ZooKeeperThread {
                 ByteBuffer bbepoch = ByteBuffer.wrap(ackEpochPacket.getData());
                 //使用learner发来的响应epoch，zxid
                 ss = new StateSummary(bbepoch.getInt(), ackEpochPacket.getZxid());
-                //投票，阻塞等待结束
+                //等待拿到follower对新纪元的确认响应，然后投票，确定多数都统一了，阻塞等待结束
                 leader.waitForEpochAck(this.getSid(), ss);
             }
             peerLastZxid = ss.getLastZxid();
            
             // Take any necessary action if we need to send TRUNC or DIFF
             // startForwarding() will be called in all cases
-            //leader与follower数据同步，返回是否需要传输快照。注意同步的只有快照，不是事务日志。
+            //leader与follower数据同步，返回是否需要传输快照。
+            //leader会根据之前follower发来的数据，判断某个follower数据是否需要同步，无论是否需要同步都会写消息发到queuedPackets
+            //由发送线程发给follower，同步消息不需要等待follower执行完成的结果。
             boolean needSnap = syncFollower(peerLastZxid, leader.zk.getZKDatabase(), leader);
             
             /* if we are not truncating or sending a diff just send a snapshot */
@@ -526,6 +539,7 @@ public class LearnerHandler extends ZooKeeperThread {
                         newLeaderZxid, null, null);
                 oa.writeRecord(newLeaderQP, "packet");
             } else {
+                //给Follower发NEWLEADER包，会将仲裁验证器发过去，统一仲裁算法。
                 QuorumPacket newLeaderQP = new QuorumPacket(Leader.NEWLEADER,
                         newLeaderZxid, leader.self.getLastSeenQuorumVerifier()
                                 .toString().getBytes(), null);
@@ -553,6 +567,8 @@ public class LearnerHandler extends ZooKeeperThread {
             if(LOG.isDebugEnabled()){
             	LOG.debug("Received NEWLEADER-ACK message from " + sid);   
             }
+            //阻塞等待NEWLEADER包的响应，因为是先发的数据同步包，然后发的NEWLEADER包，这里阻塞等到NEWLEADER的完成响应，
+            //证明数据同步也一定完成了
             leader.waitForNewLeaderAck(getSid(), qp.getZxid());
 
             syncLimitCheck.start();
@@ -573,7 +589,7 @@ public class LearnerHandler extends ZooKeeperThread {
             // using the data
             //
             LOG.debug("Sending UPTODATE message to " + sid);
-            //表明所有follower数据已更新完毕，可以为client提供服务了
+            //上面已经完成了所有follower数据同步，发送UPTODATE包，通知follower可以为client提供服务了
             queuedPackets.add(new QuorumPacket(Leader.UPTODATE, -1, null, null));
 
             while (true) {
@@ -608,6 +624,7 @@ public class LearnerHandler extends ZooKeeperThread {
                     break;
                 case Leader.PING:
                     // Process the touches
+                    //learner发来的对ping命令的响应，内容为learner内的sessionId和session超时时间
                     ByteArrayInputStream bis = new ByteArrayInputStream(qp
                             .getData());
                     DataInputStream dis = new DataInputStream(bis);
@@ -660,6 +677,7 @@ public class LearnerHandler extends ZooKeeperThread {
                         si = new Request(null, sessionId, cxid, type, bb, qp.getAuthinfo());
                     }
                     si.setOwner(this);
+                    //因为这里处理的消息一定是learner发来的，而且此处是request消息，那就是follower转发的写请求或者sync请求
                     leader.zk.submitLearnerRequest(si);
                     break;
                 default:

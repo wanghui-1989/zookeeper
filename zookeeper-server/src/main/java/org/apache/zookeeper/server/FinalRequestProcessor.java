@@ -117,6 +117,8 @@ public class FinalRequestProcessor implements RequestProcessor {
 
             // request.hdr is set for write requests, which are the only ones
             // that add to outstandingChanges.
+            //为写请求设置了request.hdr，这是唯一添加到未完成的更改中的请求。
+            //只有写请求的hdr才会有值。
             if (request.getHdr() != null) {
                 TxnHeader hdr = request.getHdr();
                 Record txn = request.getTxn();

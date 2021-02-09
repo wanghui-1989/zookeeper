@@ -79,6 +79,7 @@ public class Follower extends Learner{
                 //server.1=127.0.0.1:2888:3888
                 connectToLeader(leaderServer.addr, leaderServer.hostname);
                 //和leader建立连接后发出的第一个包，就是将当前learner的基本信息发给leader，即向leader注册当前服务器
+                //leader会返回最新的epoch，learner根据自己的情况，返回epoch的ack
                 long newEpochZxid = registerWithLeader(Leader.FOLLOWERINFO);
                 if (self.isReconfigStateChange())
                    throw new Exception("learned about role change");
@@ -90,7 +91,7 @@ public class Follower extends Learner{
                             + " is less than our accepted epoch " + ZxidUtils.zxidToString(self.getAcceptedEpoch()));
                     throw new IOException("Error: Epoch of leader is lower");
                 }
-                //和leader同步数据
+                //读取leader发来的数据如何同步的消息，和leader同步数据
                 syncWithLeader(newEpochZxid);                
                 QuorumPacket qp = new QuorumPacket();
                 while (this.isRunning()) {

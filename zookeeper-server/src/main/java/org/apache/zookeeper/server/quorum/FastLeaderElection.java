@@ -234,7 +234,7 @@ public class FastLeaderElection implements Election {
                 while (!stop) {
                     // Sleeps on receive
                     try {
-                        //处理其他服务器发来的投票数据
+                        //从QuorumCnxManager.recvQueue中拿数据
                         response = manager.pollRecvQueue(3000, TimeUnit.MILLISECONDS);
                         if(response == null) continue;
 
@@ -385,6 +385,7 @@ public class FastLeaderElection implements Election {
                                     continue;
                             }
 
+                            //将QuorumCnxManager.recvQueue中的数据结构转为投票结构
                             n.leader = rleader;
                             n.zxid = rzxid;
                             n.electionEpoch = relectionEpoch;
@@ -405,6 +406,8 @@ public class FastLeaderElection implements Election {
                              */
 
                             if(self.getPeerState() == QuorumPeer.ServerState.LOOKING){
+                                //当前服务器是LOOKING状态，将封装转化好的投票放到FastLeaderElection.recvqueue中
+                                //由另一个线程取票，仲裁。
                                 recvqueue.offer(n);
 
                                 /*

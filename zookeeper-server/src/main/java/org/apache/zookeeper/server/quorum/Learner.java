@@ -169,6 +169,8 @@ public class Learner {
     /**
      * send a request packet to the leader
      *
+     * 内部转发请求给leader
+     *
      * @param request
      *                the request from the client
      * @throws IOException
@@ -188,6 +190,7 @@ public class Learner {
             oa.write(b);
         }
         oa.close();
+        //转发请求给leader
         QuorumPacket qp = new QuorumPacket(Leader.REQUEST, -1, baos
                 .toByteArray(), request.authInfo);
         writePacket(qp, true);
@@ -334,14 +337,17 @@ public class Learner {
 
         //将当前learner的基本信息发给leader
         writePacket(qp, true);
+        //读取leader返回来的响应
         readPacket(qp);        
         final long newEpoch = ZxidUtils.getEpochFromZxid(qp.getZxid());
 		if (qp.getType() == Leader.LEADERINFO) {
+		    //Leader.LEADERINFO是选主结束后，leader在收到learner发来的包计算出最新的epoch后，将最新的纪元等数据发给所有的learner
         	// we are connected to a 1.0 server so accept the new epoch and read the next packet
         	leaderProtocolVersion = ByteBuffer.wrap(qp.getData()).getInt();
         	byte epochBytes[] = new byte[4];
         	final ByteBuffer wrappedEpochBytes = ByteBuffer.wrap(epochBytes);
         	if (newEpoch > self.getAcceptedEpoch()) {
+        	    //最新的纪元比自己的大，接受最新的纪元，将最新的纪元返回给leader
         		wrappedEpochBytes.putInt((int)self.getCurrentEpoch());
         		self.setAcceptedEpoch(newEpoch);
         	} else if (newEpoch == self.getAcceptedEpoch()) {
@@ -349,14 +355,19 @@ public class Learner {
         		// again, but we still need to send our lastZxid to the leader so that we can
         		// sync with it if it does assume leadership of the epoch.
         		// the -1 indicates that this reply should not count as an ack for the new epoch
+                //最新的纪元和自己的相同，这里就证明有问题了，给leader返回-1，表示没有接受这个新纪元
                 wrappedEpochBytes.putInt(-1);
         	} else {
+        	    //最新的纪元比自己的小
         		throw new IOException("Leaders epoch, " + newEpoch + " is less than accepted epoch, " + self.getAcceptedEpoch());
         	}
+        	//这里是将接受的epoch等消息，返回给leader，leader好确定大部分的learner都接受了这个epoch
         	QuorumPacket ackNewEpoch = new QuorumPacket(Leader.ACKEPOCH, lastLoggedZxid, epochBytes, null);
+        	//发给leader
         	writePacket(ackNewEpoch, true);
             return ZxidUtils.makeZxid(newEpoch, 0);
         } else {
+		    //这里是除了选主结束后以外的消息
         	if (newEpoch > self.getAcceptedEpoch()) {
         		self.setAcceptedEpoch(newEpoch);
         	}
@@ -384,6 +395,7 @@ public class Learner {
         // In the DIFF case we don't need to do a snapshot because the transactions will sync on top of any existing snapshot
         // For SNAP and TRUNC the snapshot is needed to save that history
         boolean snapshotNeeded = true;
+        //读取leader发来的如何同步数据的消息
         readPacket(qp);
         LinkedList<Long> packetsCommitted = new LinkedList<Long>();
         LinkedList<PacketInFlight> packetsNotCommitted = new LinkedList<PacketInFlight>();
@@ -430,6 +442,8 @@ public class Learner {
                 System.exit(13);
 
             }
+
+            //到此follower与leader数据已同步完成
             zk.getZKDatabase().initConfigInZKDatabase(self.getQuorumVerifier());
             zk.createSessionTracker();            
             
@@ -445,6 +459,7 @@ public class Learner {
             // we are now going to start getting transactions to apply followed by an UPTODATE
             outerLoop:
             while (self.isRunning()) {
+                //循环读取leader发来的数据，使用的bio，无消息的时候，流本身就有阻塞的作用
                 readPacket(qp);
                 switch(qp.getType()) {
                 case Leader.PROPOSAL:
@@ -541,12 +556,14 @@ public class Learner {
                     }
                     self.setZooKeeperServer(zk);
                     self.adminServer.setZooKeeperServer(zk);
+                    //已完成同步，退出外层while循环，可以为client提供服务了
                     break outerLoop;
                 case Leader.NEWLEADER: // Getting NEWLEADER here instead of in discovery 
                     // means this is Zab 1.0
                    LOG.info("Learner received NEWLEADER message");
                    if (qp.getData()!=null && qp.getData().length > 1) {
-                       try {                       
+                       try {
+                           //leader发来的统一的仲裁验证器
                            QuorumVerifier qv = self.configFromString(new String(qp.getData()));
                            self.setLastSeenQuorumVerifier(qv, true);
                            newLeaderQV = qv;
@@ -562,7 +579,9 @@ public class Learner {
                     self.setCurrentEpoch(newEpoch);
                     writeToTxnLog = true; //Anything after this needs to go to the transaction log, not applied directly in memory
                     isPreZAB1_0 = false;
+                    //写响应
                     writePacket(new QuorumPacket(Leader.ACK, newLeaderZxid, null, null), true);
+                    //退出switch，不是退出while
                     break;
                 }
             }
@@ -647,6 +666,7 @@ public class Learner {
             dos.writeLong(entry.getKey());
             dos.writeInt(entry.getValue());
         }
+        //直接用leader发来的ping包，改内容做为响应，头还是Leader.PING
         qp.setData(bos.toByteArray());
         writePacket(qp, true);
     }

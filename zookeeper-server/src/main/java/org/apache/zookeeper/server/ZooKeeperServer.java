@@ -135,6 +135,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
 
     private final AtomicInteger requestsInProcess = new AtomicInteger(0);
     //存放本次操作导致的节点变更记录，ChangeRecord存的是节点最终的样子，非变化记录。
+    //outstanding：未完成的，changes：更改，即未完成的更改队列
     final Deque<ChangeRecord> outstandingChanges = new ArrayDeque<>();
     // this data structure must be accessed under the outstandingChanges lock
     final HashMap<String, ChangeRecord> outstandingChangesForPath =
@@ -1124,7 +1125,7 @@ public class ZooKeeperServer implements SessionExpirer, ServerStats.Provider {
     }
 
     public void processPacket(ServerCnxn cnxn, ByteBuffer incomingBuffer) throws IOException {
-        //处理客户端请求
+        //处理的是client客户端请求
         // We have the request, now process and setup for next
         InputStream bais = new ByteBufferInputStream(incomingBuffer);
         BinaryInputArchive bia = BinaryInputArchive.getArchive(bais);

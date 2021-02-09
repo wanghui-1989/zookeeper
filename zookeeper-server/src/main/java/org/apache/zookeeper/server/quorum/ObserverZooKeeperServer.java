@@ -69,7 +69,10 @@ public class ObserverZooKeeperServer extends LearnerZooKeeperServer {
      * Unlike a Follower, which sees a full request only during the PROPOSAL
      * phase, Observers get all the data required with the INFORM packet. 
      * This method commits a request that has been unpacked by from an INFORM
-     * received from the Leader. 
+     * received from the Leader.
+     *
+     * Follower仅在PROPOSAL阶段看到完整的请求，与众不同的是，Observers使用INFORM数据包获取所需的所有数据。
+     * 此方法提交从Leader收到的INFORM包中提取的数据。
      *      
      * @param request
      */

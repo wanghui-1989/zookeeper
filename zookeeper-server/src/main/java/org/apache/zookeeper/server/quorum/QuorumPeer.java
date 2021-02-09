@@ -118,6 +118,7 @@ import static org.apache.zookeeper.common.NetUtils.formatInetAddr;
  *     long leader_zxid;
  *
  * 当前Leader的请求将仅包含一个xid：int xid;
+ *
  */
 public class QuorumPeer extends ZooKeeperThread implements QuorumStats.Provider {
     private static final Logger LOG = LoggerFactory.getLogger(QuorumPeer.class);

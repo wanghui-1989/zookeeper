@@ -164,6 +164,7 @@ public class Leader {
     }
 
     // Pending sync requests. Must access under 'this' lock.
+    //存的都是在等待某个事务提交完成，发出sync响应的请求。
     private final HashMap<Long,List<LearnerSyncRequest>> pendingSyncs =
         new HashMap<Long,List<LearnerSyncRequest>>();
 
@@ -325,6 +326,8 @@ public class Leader {
     /**
      * This message type is sent to a leader to request and mutation operation.
      * The payload will consist of a request header followed by a request.
+     *
+     * 此消息类型发送给leader以请求和进行变异操作。 有效负载将由一个请求标头和一个请求组成。
      */
     final static int REQUEST = 1;
 
@@ -404,6 +407,7 @@ public class Leader {
                     Socket s = null;
                     boolean error = false;
                     try {
+                        //监听集群通讯端口
                         s = ss.accept();
 
                         // start with the initLimit, once the ack is processed
@@ -501,8 +505,9 @@ public class Leader {
             cnxAcceptor = new LearnerCnxAcceptor();
             cnxAcceptor.start();
 
-            //每个follower确定自己为follower后，会主动连接leader，发送sid和zxid等，
-            //在LearnerHandler接收到follower消息后，也会调这个方法，帮助leader确定新的epoch
+            //选举后，每个follower确定自己是follower后，会主动连接leader，发送sid和zxid等，
+            //leader起的LearnerHandler线程在接收到follower消息后，也会调这个方法，相当于参与投票，帮助leader确定新的epoch
+            //投票最终结果没有出来之前，此处一直阻塞等待
             long epoch = getEpochToPropose(self.getId(), self.getAcceptedEpoch());
 
             zk.setZxid(ZxidUtils.makeZxid(epoch, 0));
@@ -559,12 +564,14 @@ public class Leader {
             // We have to get at least a majority of servers in sync with
             // us. We do this by waiting for the NEWLEADER packet to get
             // acknowledged
-            // 阻塞等待确定epoch
+            //看learnerHandler的逻辑，leader在确认完新epoch后，会将该epoch发给所有follower
+            //此处是等待拿到follower对新纪元的确认响应，然后投票，确定多数都统一了，阻塞等待结束
              waitForEpochAck(self.getId(), leaderStateSummary);
-             //
+             //集群纪元统一了
              self.setCurrentEpoch(epoch);    
             
              try {
+                 //阻塞等待NEWLADER包的响应，
                  waitForNewLeaderAck(self.getId(), zk.getZxid());
              } catch (InterruptedException e) {
                  shutdown("Waiting for a quorum of followers, only synced with sids: [ "
@@ -630,6 +637,10 @@ public class Leader {
             String shutdownMessage = null;
 
             while (true) {
+                //leader不断循环，主要是做两件事：
+                // 1.收集LearnerHandler线程还存活 并且 与leader失联时长未超过超时时间的sid，
+                //    判断是否还有超半数的具有投票权的服务器存活，确保集群仍能具备投票的基本条件。如果不具备，跳出循环，重新选主。
+                // 2.ping所有learner，更新上面说的超时时间。
                 synchronized (this) {
                     long start = Time.currentElapsedTime();
                     long cur = start;
@@ -646,6 +657,7 @@ public class Leader {
                     // We use an instance of SyncedLearnerTracker to
                     // track synced learners to make sure we still have a
                     // quorum of current (and potentially next pending) view.
+                    //我们使用SyncedLearnerTracker实例来跟踪已同步的学习者，以确保我们仍具有当前（以及潜在的下一个未决）视图的法定人数。
                     SyncedLearnerTracker syncedAckSet = new SyncedLearnerTracker();
                     syncedAckSet.addQuorumVerifier(self.getQuorumVerifier());
                     if (self.getLastSeenQuorumVerifier() != null
@@ -659,6 +671,8 @@ public class Leader {
 
                     for (LearnerHandler f : getLearners()) {
                         if (f.synced()) {
+                            //learnerHandler线程存活，并且收到learner通信的时间未超过存活超时时间
+                            //这里就是收集所有还能正常运行和通信的learner的sid
                             syncedAckSet.addAck(f.getSid());
                         }
                     }
@@ -679,6 +693,8 @@ public class Leader {
                     }
                     tickSkip = !tickSkip;
                 }
+
+                //leader主动发ping给所有learner
                 for (LearnerHandler f : getLearners()) {
                     f.ping();
                 }
@@ -864,8 +880,9 @@ public class Leader {
             inform(p);
         }
 
-        //调用CommitProcessor.commit
+        //调用CommitProcessor.commit，提交请求。
         zk.commitProcessor.commit(p.request);
+        //提交完请求后，可以发出等待该事务提交完成，数据同步的sync响应了
         if(pendingSyncs.containsKey(zxid)){
             for(LearnerSyncRequest r: pendingSyncs.remove(zxid)) {
                 sendSync(r);
@@ -1210,6 +1227,9 @@ public class Leader {
             if (l == null) {
                 l = new ArrayList<LearnerSyncRequest>();
             }
+            //lastProposed是最新的或者说是当前正在处理的提案zxid，同步请求在这个之后到，只要这个提案处理完成就可以发出sync响应了。
+            //这里一个隐含的意思是，zxid提交都是按照从小到大顺序提交的，这个最新的提交了，那它之前的所有也就提交了，此时可以发sync响应了。
+            //将sync请求对象加到list末尾
             l.add(r);
             pendingSyncs.put(lastProposed, l);
         }
@@ -1312,7 +1332,7 @@ public class Leader {
                 long cur = start;
                 long end = start + self.getInitLimit()*self.getTickTime();
                 while(waitingForNewEpoch && cur < end) {
-                    //阻塞知道投票超时结束
+                    //阻塞直到投票超时结束
                     connectingFollowers.wait(end - cur);
                     cur = Time.currentElapsedTime();
                 }
