@@ -112,7 +112,7 @@ public class FinalRequestProcessor implements RequestProcessor {
         ProcessTxnResult rc = null;
         synchronized (zks.outstandingChanges) {
             // Need to process local session requests
-            //将请求应用于内存树DataTree，返回操作结果
+            //将请求应用于内存树DataTree，触发事件通知，返回操作结果
             rc = zks.processTxn(request);
 
             // request.hdr is set for write requests, which are the only ones
@@ -159,9 +159,11 @@ public class FinalRequestProcessor implements RequestProcessor {
             }
         }
 
+        // 获取请求中的客户端信息，如果为null，证明请求是leader发来的commit命令等，不是直连的客户端发给自己的写请求，不需要继续执行。
         if (request.cnxn == null) {
             return;
         }
+
         ServerCnxn cnxn = request.cnxn;
 
         String lastOp = "NA";
