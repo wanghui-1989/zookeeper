@@ -1223,6 +1223,8 @@ public class Leader {
             sendSync(r);
         } else {
             //获取lastProposed(是个zxid)，对应的所有同步请求
+            //因为处理器是单线程的，是按照写请求的先后顺序更新lastProposed的，假如目前的lastProposed=5
+            //则sync同步请求，可以理解为等提案5提交以后，对他来说就已经是完成同步了，所以将它放到5对应的list中。
             List<LearnerSyncRequest> l = pendingSyncs.get(lastProposed);
             if (l == null) {
                 l = new ArrayList<LearnerSyncRequest>();

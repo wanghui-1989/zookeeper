@@ -32,7 +32,6 @@ import org.slf4j.LoggerFactory;
  *
  * Proposal:提案
  *
- * TODO 貌似只有Leader才有执行这个处理器？？？
  *
  * 主要逻辑：
  *  前一个处理器PrepRequestProcessor已经将请求封装好了，到这里其实就是应该由leader发起提案了（对写操作来说）

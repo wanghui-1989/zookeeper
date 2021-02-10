@@ -460,6 +460,9 @@ public class Learner {
             outerLoop:
             while (self.isRunning()) {
                 //循环读取leader发来的数据，使用的bio，无消息的时候，流本身就有阻塞的作用
+                //此处使用流的阻塞，来保证在learner启动初始化阶段，只要没有收到leader发来的UPTODATE包，
+                //就一直循环读取或者阻塞等待，不会对外提供服务，处理client的请求。
+                // 收到UPTODATE包后跳出while循环，解除阻塞。进入读取和处理client数据的while循环中。
                 readPacket(qp);
                 switch(qp.getType()) {
                 case Leader.PROPOSAL:

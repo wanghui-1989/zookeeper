@@ -91,7 +91,7 @@ public class Follower extends Learner{
                             + " is less than our accepted epoch " + ZxidUtils.zxidToString(self.getAcceptedEpoch()));
                     throw new IOException("Error: Epoch of leader is lower");
                 }
-                //读取leader发来的数据如何同步的消息，和leader同步数据
+                //读取leader发来的数据如何同步的消息，和leader同步数据，阻塞在流上等待同步完成后才能处理client请求。
                 syncWithLeader(newEpochZxid);                
                 QuorumPacket qp = new QuorumPacket();
                 while (this.isRunning()) {

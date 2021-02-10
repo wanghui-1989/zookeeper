@@ -86,11 +86,13 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
         this.clientConfig = clientConfig;
         // Client only has 1 outgoing socket, so the event loop group only needs
         // a single thread.
+        //优先使用epoll
         eventLoopGroup = NettyUtils.newNioOrEpollEventLoopGroup(1 /* nThreads */);
         initProperties();
     }
 
     /**
+     * 生命周期图
      * lifecycles diagram:
      * <p/>
      * loop:
@@ -360,8 +362,9 @@ public class ClientCnxnSocketNetty extends ClientCnxnSocket {
      * 把outgoingQueue都取空了之后，才会退出循环，最后调一次flush。
      * 按照这个顺序和单线程的写法，从packet被放到outgoingQueue中以后，后面都是按照从头到尾的顺序来的，也就是入队的先后顺序。
      * 按这个顺序放到pendingQueue，然后按这个顺序写channel，发送到服务器。服务器收到反序列化后，也是按照发送的先后顺序。
-     * 因为是同一个服务器，同一个业务，正常来说，先到服务器，先被处理，因为是相同的业务代码，处理时间基本差不多，
-     * 所以基本也会按照这个先后顺序，返回到客户端。到了客户端，按照从头到尾的顺序直接从pendingQueue取packet，基本上应该是一一匹配的。
+     * 因为是同一个服务器peer，经过处理器链，会按照先后顺序入队，也会按照这个顺序取出处理，就算是到了多线程并发的处理器，
+     * 也是按照客户端sessionId取模选择执行线程，同一个客户端的请求交给同一个线程处理，也是按照先后顺序处理。
+     * 所以也会按照请求的先后顺序，写响应到对应客户端。到了客户端，按照从头到尾的顺序直接从pendingQueue取packet，应该是一一匹配的。
      * 如果不匹配，看下他的处理逻辑，好像是抛异常。
      */
     private void doWrite(List<Packet> pendingQueue, Packet p, ClientCnxn cnxn) {
